@@ -1,0 +1,3 @@
+-keep class org.videolan.** { *; }
+-keep class com.spotify.** { *; }
+-keep class com.hoho.android.usbserial.** { *; }

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Common ELM327 USB bridges -->
+    <usb-device vendor-id="6790"  product-id="29987" /> <!-- CH340 -->
+    <usb-device vendor-id="4292"  product-id="60000" /> <!-- CP2102 -->
+    <usb-device vendor-id="1027"  product-id="24577" /> <!-- FTDI FT232 -->
+    <usb-device vendor-id="1027"  product-id="24597" /> <!-- FTDI FT231X (OBDLink SX) -->
+    <usb-device vendor-id="1659"  product-id="8963"  /> <!-- PL2303 -->
+    <!-- RTL-SDR (RTL2832U): 0x2838 default, 0x2832 alternate -->
+    <usb-device vendor-id="3034"  product-id="10296" />
+    <usb-device vendor-id="3034"  product-id="10290" />
+    <!-- u-blox 7 USB GPS/GNSS (0x1546/0x01a7) -->
+    <usb-device vendor-id="5446"  product-id="423" />
+</resources>

@@ -38,9 +38,16 @@ substitute.
 
 - **OBD dongle**: vLinker FS (FTDI FT231X), 115200 baud. Key-off →
   `UNABLE TO CONNECT` is normal (ECU asleep).
-- **Reverse gear**: from CAN ID **`0x60D`**, data **byte0 bit3 (0x08)**.
-  The ELM monitor capture must run with headers on (`ATH1`) or frames print
-  with no ID — this was the long-standing reverse-cam bug (see OPEN ITEMS).
+- **Door ajar (NOT reverse)**: CAN ID **`0x60D`** byte0 **bit3 (0x08)** is
+  the **driver-door switch** — field-confirmed 2026-07-19 when the "reverse"
+  overlay fired on door-open, key on, gear in P. The 2026-07-16 capture that
+  pinned bit3 to reverse was the door still ajar from getting in. Other
+  byte0 bits are unmapped (remaining doors and brake are the candidates);
+  map them by opening one door at a time watching `logcat -s Helm | grep
+  60D`, then widen `CanRepository.DOOR_BITS`. **Reverse gear is currently
+  unmapped** — see OPEN ITEMS. Capture gotcha that still applies: ELM
+  monitor output obeys the headers setting — capture with `ATH1` or frames
+  print with no ID.
 - **Viofo A329S dashcam**: joins the head unit's own 5 GHz SoftAP
   **`helmnet`** (no hyphen) / pass `helmrecon`, lands at
   **192.168.133.208**. A `/32` VPN-bypass route is pinned so the head unit
@@ -77,11 +84,27 @@ style: terse subject + feature-grouped body + Claude trailers.
 
 ## OPEN ITEMS
 
-1. **Reverse-cam auto-switch** — the `ATH1` capture fix is deployed but
-   **unconfirmed**; needs a key-on shift into Reverse to verify the overlay
-   fires. Every `0x60D` byte0 transition is logged (`logcat -s Helm | grep
-   60D`) to nail the exact bit map on the next drive. This is the one task
-   the owner wants to tackle live, on their signal.
+1. **Reverse detection — signal unknown.** The old 0x60D bit3 source was
+   the driver-door switch (see hardware facts), so `VehicleState.reverse`
+   now has NO live source and the auto rear-cam never fires. Finding the
+   real gear signal is a live-vehicle capture task, on the owner's signal:
+
+   - Key on, engine running, parked, doors SHUT (so 0x60D noise doesn't
+     pollute the diff). For each of P, R, N, D — hold the gear, run one
+     full-bus monitor burst, label it:
+     `adb -s 10.255.1.6:5555 shell am broadcast -a com.xterra.helm.ELM_CMD
+     --es cmd "ATH1;MON:1500"`
+     then save `adb -s 10.255.1.6:5555 logcat -s Helm -d | tail -60`.
+   - Diff frames across gears: the reverse indicator is whatever ID/byte
+     flips R-only (brake is held throughout, so it cancels out — that was
+     the confound last time).
+   - If nothing R-only shows on the OBD-visible bus, the gear signal may
+     live on the body bus segment the ELM can't see → fall back to the
+     GPIO reverse-lamp opto tap (`GpioReverseSensor`, hardware in
+     `docs/HARDWARE.md`), which is wiring work but unambiguous.
+   - Once mapped, wire it into `Elm327Manager` the way the door bit is
+     done, re-enable nothing else — `ReverseOverlayService` already
+     collects `VehicleState.reverse`.
 2. **Thermal (UVC) camera** — parked; the `libausbc` JitPack dependency is
    broken and needs re-sourcing before `ThermalView` can build for real.
 3. Config still partly inline (some constants) vs. the settings panel —

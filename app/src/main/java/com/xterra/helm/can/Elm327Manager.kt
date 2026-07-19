@@ -33,7 +33,7 @@ class Elm327Manager(
         val fuelPct: Float? = null, val batteryV: Float? = null,
         val dtcCount: Int? = null, val milOn: Boolean? = null,
         val dtcCodes: List<String>? = null,
-        val reverse: Boolean? = null,
+        val bcmByte0: Int? = null,        // raw 0x60D byte0 (door switches)
     )
 
     private var port: UsbSerialPort? = null
@@ -127,7 +127,7 @@ class Elm327Manager(
             s = s.copy(
                 throttlePct = pid("0111")?.let { it[0] * 100f / 255f },
                 mafGs = pid("0110")?.let { (it[0] * 256 + it[1]) / 100f },
-                reverse = readReverse(),
+                bcmByte0 = readBcmByte0(),
             )
             silent = if (rpm == null && spd == null) silent + 1 else 0
             if (silent >= 5) return   // ~1.5 s of dead bus → ignition off
@@ -139,23 +139,26 @@ class Elm327Manager(
     }
 
     /**
-     * Reverse gear off the CAN bus — no wiring, OBD-only. Signature found by
-     * bus capture on this D40 (2026-07-16): broadcast ID 0x60D, data byte 0
-     * carries reverse in bit3 (0x08). Match the BIT, not the whole byte: the
-     * capture that showed 0x28 was almost certainly bit3 + bit5 together, and
-     * bit5 co-occurring (brake pedal is the prime suspect — your foot is on
-     * it whenever you shift into R) is exactly why an exact ==0x08 match
-     * missed reverse on real drives. Every byte0 transition is logged so the
-     * next drive validates the bit map. We set the ELM receive filter to
-     * 0x60D, snapshot ~120 ms of frames, then restore all-receive for the
-     * next PID rotation.
+     * BCM broadcast 0x60D, byte 0 — originally believed to carry reverse in
+     * bit3 (0x08). Field-confirmed 2026-07-19 that bit3 is actually the
+     * DRIVER DOOR ajar switch: the "reverse" overlay fired the moment the
+     * driver door opened, key on, gear in P. The 2026-07-16 capture that
+     * showed 0x08 during a shift into R was the door still ajar from getting
+     * in, not the gear. Reverse is NOT on this bit; the real gear signal is
+     * still unmapped (procedure in docs/HANDOFF.md OPEN ITEMS).
+     *
+     * We keep snapshotting the frame because door state is worth showing in
+     * its own right, and byte0 transitions stay logged so the remaining bits
+     * (other doors / brake are candidates) can be mapped by opening one door
+     * at a time. Same capture dance as before: receive-filter to 0x60D,
+     * ~200 ms burst, restore all-receive for the next PID rotation.
      *
      * Returns null if the frame wasn't seen this cycle — the repository holds
-     * the last known state rather than dropping out of reverse on one miss.
+     * the last known state rather than flapping on one miss.
      */
-    private var lastRevByte = -1
-    private var revMisses = 0
-    private fun readReverse(): Boolean? {
+    private var lastBcmByte = -1
+    private var bcmMisses = 0
+    private fun readBcmByte0(): Int? {
         port ?: return null
         // ATMA output OBEYS the headers setting: with ATH0 (our PID-poll
         // state) monitored frames print as bare data bytes with NO "60D"
@@ -171,17 +174,18 @@ class Elm327Manager(
             ?.groupValues?.get(1)?.toIntOrNull(16)
         if (b0 == null) {
             // Surface a persistent capture failure instead of dying silently.
-            if (++revMisses % 100 == 0)
-                Log.w(TAG, "60D: no frames in last $revMisses captures; raw tail: " +
+            if (++bcmMisses % 100 == 0)
+                Log.w(TAG, "60D: no frames in last $bcmMisses captures; raw tail: " +
                     cap.takeLast(60).replace("\r", "|"))
             return null
         }
-        revMisses = 0
-        if (b0 != lastRevByte) {
-            Log.i(TAG, "60D byte0 0x%02X -> reverse=%b".format(b0, b0 and 0x08 != 0))
-            lastRevByte = b0
+        bcmMisses = 0
+        if (b0 != lastBcmByte) {
+            Log.i(TAG, "60D byte0 0x%02X (bit3=driver door: %b)"
+                .format(b0, b0 and 0x08 != 0))
+            lastBcmByte = b0
         }
-        return (b0 and 0x08) != 0
+        return b0
     }
 
     /**

@@ -22,6 +22,8 @@ data class VehicleState(
     val instantMpg: Float? = null,     // derived from MAF + speed
     val avgMpg: Float? = null,
     val reverse: Boolean = false,
+    val doorOpen: Boolean = false,     // any *confirmed* door bit set
+    val bcmByte0: Int? = null,         // raw 0x60D byte0, for bit-mapping
     val dtcCount: Int = 0,
     val milOn: Boolean = false,
     val dtcCodes: List<String> = emptyList(),
@@ -33,8 +35,12 @@ data class VehicleState(
  *  - [Elm327Manager]: USB ELM327/OBDLink dongle. Works on any Android, no root.
  *  - [SocketCanManager]: native can0 on the Edge2 IO hat (MCP2515/FlexCAN),
  *    for raw 500 kbit CAN sniffing of the Xterra body/powertrain bus.
- * Reverse gear additionally comes from [GpioReverseSensor] (reverse-lamp tap),
- * which is the reliable path on a 2008 Xterra — OBD does not expose gear.
+ * Reverse gear currently has NO live source: the CAN bit we shipped on
+ * (0x60D byte0 bit3) turned out to be the driver-door switch, and the
+ * [GpioReverseSensor] lamp tap is unwired. Until the real gear signal is
+ * mapped (docs/HANDOFF.md OPEN ITEMS), `reverse` stays false and the
+ * rear-cam overlay simply never auto-fires — which also fixes it firing
+ * every time the driver door opened.
  */
 class CanRepository(context: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -46,11 +52,6 @@ class CanRepository(context: Context) {
     private val _mpgHistory = MutableStateFlow<List<Float>>(emptyList())
     val mpgHistory: StateFlow<List<Float>> = _mpgHistory
     private val mpgRing = ArrayDeque<Pair<Long, Float>>()
-
-    // Reverse now comes from the CAN bus (ID 0x60D) via ELM — no lamp-tap
-    // wiring. GpioReverseSensor stays as a dormant fallback for when a hat
-    // pin is eventually wired; CAN wins whenever the ECU is live.
-    private var canReverse = false
 
     private val elm = Elm327Manager(
         context,
@@ -65,17 +66,19 @@ class CanRepository(context: Context) {
         },
     ) { partial -> merge(partial) }
     private val gpio = GpioReverseSensor { inReverse ->
-        // Only honor the lamp tap when CAN isn't asserting reverse itself.
-        if (!canReverse) _state.value = _state.value.copy(reverse = inReverse)
+        // Sole reverse source while the CAN gear signal is unmapped — and
+        // it's dormant (unwired). See start().
+        _state.value = _state.value.copy(reverse = inReverse)
     }
     private val mpg = MpgIntegrator()
 
     fun start() {
         scope.launch { elm.connectAndPoll() }
-        // GPIO reverse watcher intentionally NOT started: reverse comes from
-        // the CAN bus now (0x60D), and pin 113 floats HIGH while unwired —
-        // running the watcher self-triggers a black rear-cam overlay on every
-        // power cycle. Re-enable only once an opto is physically wired.
+        // GPIO reverse watcher intentionally NOT started: pin 113 floats
+        // HIGH while unwired — running the watcher self-triggers a black
+        // rear-cam overlay on every power cycle. Re-enable only once an
+        // opto is physically wired (or the CAN gear signal is mapped and
+        // this fallback becomes moot).
         // scope.launch { gpio.watch() }
     }
 
@@ -86,7 +89,6 @@ class CanRepository(context: Context) {
 
     private fun merge(p: Elm327Manager.Sample) {
         val prev = _state.value
-        p.reverse?.let { canReverse = it }        // null = frame missed; hold
         val inst = mpg.instantMpg(p.mafGs, p.speedKmh)
         val now = System.currentTimeMillis()
         synchronized(mpgRing) {
@@ -110,9 +112,24 @@ class CanRepository(context: Context) {
             dtcCount = p.dtcCount ?: prev.dtcCount,
             milOn = p.milOn ?: prev.milOn,
             dtcCodes = p.dtcCodes ?: prev.dtcCodes,
-            reverse = canReverse,
+            // null = frame missed this cycle; hold last known door state.
+            bcmByte0 = p.bcmByte0 ?: prev.bcmByte0,
+            doorOpen = ((p.bcmByte0 ?: prev.bcmByte0 ?: 0) and DOOR_BITS) != 0,
             source = "ELM327/USB",
         )
+    }
+
+    companion object {
+        /**
+         * 0x60D byte0 bits that are CONFIRMED door switches. Only bit3
+         * (driver door, field-verified 2026-07-19) so far. Other byte0 bits
+         * likely include the remaining doors and/or brake — map them by
+         * opening one door at a time and watching `logcat -s Helm | grep
+         * 60D`, then widen this mask. Do NOT widen speculatively: an
+         * unmapped bit here (e.g. brake) would flag "door open" on every
+         * pedal press.
+         */
+        const val DOOR_BITS = 0x08
     }
 }
 

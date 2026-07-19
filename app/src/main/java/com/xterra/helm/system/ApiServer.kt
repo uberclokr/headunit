@@ -115,6 +115,7 @@ object ApiServer {
                 "avgMpg" to can.avgMpg, "dtcCount" to can.dtcCount,
                 "milOn" to can.milOn, "dtcCodes" to can.dtcCodes,
                 "reverse" to can.reverse,
+                "doorOpen" to can.doorOpen, "bcmByte0" to can.bcmByte0,
             ),
             "battery" to mapOf(
                 "connected" to batt.connected, "socPct" to batt.socPct,

@@ -27,6 +27,8 @@ class HelmApp : Application() {
         private set
     lateinit var viofo: com.xterra.helm.cameras.ViofoLocator
         private set
+    lateinit var clips: com.xterra.helm.cameras.ViofoClips
+        private set
     lateinit var gps: com.xterra.helm.nav.GpsRepository
         private set
     lateinit var poi: com.xterra.helm.nav.PoiStore
@@ -48,6 +50,7 @@ class HelmApp : Application() {
         battery = BatteryRepository(this)
         homeLink = HomeLinkRepository()
         viofo = com.xterra.helm.cameras.ViofoLocator(cameras)
+        clips = com.xterra.helm.cameras.ViofoClips(this)
         gps = com.xterra.helm.nav.GpsRepository(this)
         poi = com.xterra.helm.nav.PoiStore(this)
         settings = com.xterra.helm.system.SettingsRepository(this)

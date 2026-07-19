@@ -2,10 +2,14 @@ package com.xterra.helm.media
 
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.Drawable
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
-import android.graphics.Bitmap
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -72,6 +76,46 @@ class MediaRepository(private val context: Context) {
     }
 
     private fun controllerFor(pkg: String) = controllers.firstOrNull { it.packageName == pkg }
+
+    data class MediaApp(val pkg: String, val label: String, val icon: Bitmap?)
+
+    /**
+     * Every installed audio app, discovered dynamically: anything exposing a
+     * MediaBrowserService is a media player (that's how Android Auto
+     * enumerates them) — Spotify, YT Music, Audible, NPR One, VLC, podcast
+     * apps… System providers with no launcher (Bluetooth) and the
+     * Assistant/Google search provider are filtered out. Cached after the
+     * first call; the installed set doesn't change at runtime.
+     */
+    private var mediaAppsCache: List<MediaApp>? = null
+    fun installedMediaApps(): List<MediaApp> = mediaAppsCache ?: run {
+        val pm = context.packageManager
+        val deny = setOf("com.android.bluetooth",
+            "com.google.android.googlequicksearchbox")
+        val list = pm.queryIntentServices(
+            Intent("android.media.browse.MediaBrowserService"), 0)
+            .map { it.serviceInfo.packageName }.distinct()
+            .filter { it !in deny && pm.getLaunchIntentForPackage(it) != null }
+            .mapNotNull { pkg ->
+                runCatching {
+                    val ai = pm.getApplicationInfo(pkg, 0)
+                    MediaApp(pkg, pm.getApplicationLabel(ai).toString(),
+                        drawableToBitmap(pm.getApplicationIcon(ai)))
+                }.getOrNull()
+            }.sortedBy { it.label.lowercase() }
+        mediaAppsCache = list
+        list
+    }
+
+    private fun drawableToBitmap(d: Drawable): Bitmap? = runCatching {
+        (d as? BitmapDrawable)?.bitmap ?: run {
+            val w = d.intrinsicWidth.coerceIn(1, 192)
+            val h = d.intrinsicHeight.coerceIn(1, 192)
+            Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { bmp ->
+                Canvas(bmp).let { c -> d.setBounds(0, 0, c.width, c.height); d.draw(c) }
+            }
+        }
+    }.getOrNull()
 
     fun playPause(pkg: String) {
         val c = controllerFor(pkg) ?: return

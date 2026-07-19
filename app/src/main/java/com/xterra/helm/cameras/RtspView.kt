@@ -52,12 +52,26 @@ fun RtspView(
 ) {
     val context = LocalContext.current
     val libVlc = remember {
-        LibVLC(context, arrayListOf(
-            "--rtsp-tcp",
-            "--network-caching=${if (lowLatency) 150 else 600}",
+        val args = arrayListOf(
+            "--network-caching=${if (lowLatency) 80 else 600}",
             "--clock-jitter=0", "--clock-synchro=0",
             "--drop-late-frames", "--skip-frames",
-        ))
+        )
+        if (lowLatency) {
+            // Latency stack for the backup cam, measured pieces:
+            //  - RTP over UDP (no --rtsp-tcp): drops TCP head-of-line
+            //    blocking on the one clean AP hop; VLC still falls back to
+            //    TCP if UDP setup fails.
+            //  - no-audio: the A/V sync buffer costs several hundred ms and
+            //    a backup cam is a visual instrument.
+            //  - fast decode + no loop filter: shaves decode time, cosmetic
+            //    quality cost only.
+            args += listOf("--no-audio", "--avcodec-fast",
+                "--avcodec-skiploopfilter=all")
+        } else {
+            args += "--rtsp-tcp"     // stability over latency for other panes
+        }
+        LibVLC(context, args)
     }
     val curUrl by rememberUpdatedState(url)
     val lastFrameMs = remember { AtomicLong(0) }

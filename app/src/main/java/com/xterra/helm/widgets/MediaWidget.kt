@@ -4,6 +4,9 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -39,13 +42,17 @@ fun MediaWidget() {
     val np = sessions.firstOrNull { it.packageName == selectedPkg } ?: active
     val ctx = LocalContext.current
 
+    // No live session: offer a launcher grid of every installed audio app.
+    if (sessions.isEmpty()) { MediaLauncher(); return }
+
     Box(Modifier.fillMaxSize()) {
         np.art?.let {
             Image(it.asImageBitmap(), null, Modifier.fillMaxSize().alpha(0.35f),
                 contentScale = ContentScale.Crop)
         }
         Column(Modifier.fillMaxSize().padding(16.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically) {
                 sessions.forEach { s ->
                     val sel = s.packageName == np.packageName
                     Text(
@@ -59,12 +66,17 @@ fun MediaWidget() {
                             .padding(horizontal = 10.dp, vertical = 6.dp),
                     )
                 }
-                if (sessions.isEmpty()) {
-                    Text("No active players — open Spotify / YT Music / Audible",
-                        style = MaterialTheme.typography.bodyMedium, color = HelmColors.TextDim,
-                        modifier = Modifier.clickable {
-                            AppLauncher.launchFull(ctx, "com.spotify.music")
-                        })
+                if (np.packageName.isNotEmpty()) {
+                    Spacer(Modifier.weight(1f))
+                    // In-app browsing is gated by each app's MediaBrowserService
+                    // (all three refuse non-Android-Auto callers), so browse in
+                    // the real app — freeform beside Helm.
+                    Text("OPEN APP ↗", style = MaterialTheme.typography.labelSmall,
+                        color = HelmColors.Cyan,
+                        modifier = Modifier.clip(RoundedCornerShape(8.dp))
+                            .background(HelmColors.Glass.copy(alpha = 0.7f))
+                            .clickable { AppLauncher.launchFull(ctx, np.packageName) }
+                            .padding(horizontal = 10.dp, vertical = 6.dp))
                 }
             }
             Spacer(Modifier.weight(1f))
@@ -81,6 +93,52 @@ fun MediaWidget() {
                     big = true,
                 ) { repo.playPause(np.packageName) }
                 TransportButton(Icons.Filled.SkipNext) { repo.next(np.packageName) }
+            }
+        }
+    }
+}
+
+/**
+ * Shown when nothing is playing: a tap-to-open tile for each installed audio
+ * app (dynamically detected via MediaBrowserService). Once the chosen app
+ * starts playing, its MediaSession appears and MediaWidget flips back to the
+ * transport view automatically.
+ */
+@Composable
+private fun MediaLauncher() {
+    val ctx = LocalContext.current
+    val apps = remember { HelmApp.instance.media.installedMediaApps() }
+    Column(Modifier.fillMaxSize().padding(18.dp)) {
+        Text("NOTHING PLAYING", style = MaterialTheme.typography.titleMedium,
+            color = HelmColors.Amber)
+        Text("tap an app to pick something",
+            style = MaterialTheme.typography.labelSmall, color = HelmColors.TextDim)
+        Spacer(Modifier.height(16.dp))
+        if (apps.isEmpty()) {
+            Text("no media apps installed", color = HelmColors.TextDim)
+            return
+        }
+        LazyVerticalGrid(
+            columns = GridCells.Adaptive(minSize = 108.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            items(apps, key = { it.pkg }) { app ->
+                Column(
+                    Modifier.clip(RoundedCornerShape(12.dp))
+                        .background(HelmColors.Panel.copy(alpha = 0.7f))
+                        .clickable { AppLauncher.launchFull(ctx, app.pkg) }
+                        .padding(vertical = 14.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    app.icon?.let {
+                        Image(it.asImageBitmap(), null, Modifier.size(52.dp))
+                    } ?: Icon(Icons.Filled.MusicNote, null, Modifier.size(52.dp),
+                        tint = HelmColors.TextDim)
+                    Spacer(Modifier.height(8.dp))
+                    Text(app.label, style = MaterialTheme.typography.labelSmall,
+                        color = HelmColors.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
         }
     }

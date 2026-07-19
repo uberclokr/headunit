@@ -66,6 +66,12 @@ class VehicleService : LifecycleService() {
         HelmApp.instance.viofo.start()
         HelmApp.instance.gps.start()
         HelmApp.instance.net.start()
+        // Companion-app back end: status API + camera relay, served over WG.
+        ApiServer.start()
+        RtspRelay.start()
+        // Companion-app API + camera relay (VPN-facing, see ApiServer).
+        ApiServer.start()
+        RtspRelay.start()
         startForegroundService(Intent(this, ReverseOverlayService::class.java))
         // Apply persisted config (settings panel) to the subsystems that used
         // to hardcode it, then start the battery link and the AP watchdog.

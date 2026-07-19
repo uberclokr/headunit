@@ -16,6 +16,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -141,6 +142,42 @@ fun SettingsWidget() {
         Btn(if (s.revMirror) "OVERLAY MIRRORED (rear-view sense) — tap to unmirror"
             else "OVERLAY UNMIRRORED — tap to mirror") {
             HelmApp.instance.settings.setRevMirror(!s.revMirror)
+        }
+
+        Spacer(Modifier.height(10.dp))
+        CompanionSection()
+    }
+}
+
+/**
+ * Companion-app pairing: a QR + link to the APK served off this head unit's
+ * own API. The download URL points at the head unit's WG address, and the
+ * app ships pre-configured to talk back to that same address — install on a
+ * phone already on the VPN and it just connects.
+ */
+@Composable
+private fun CompanionSection() {
+    val wg = remember { com.xterra.helm.system.WgAddress.get() }
+    val url = "http://${wg ?: "10.255.1.6"}:${com.xterra.helm.system.ApiServer.PORT}/companion.apk"
+    val qr = remember(url) { com.xterra.helm.system.QrCode.bitmap(url, 420) }
+
+    Text("COMPANION APP", style = MaterialTheme.typography.titleMedium, color = HelmColors.Amber)
+    Text("scan on a phone that's on the vehicle VPN — installs pre-configured for "
+        + "$wg", style = MaterialTheme.typography.labelSmall, color = HelmColors.TextDim)
+    Spacer(Modifier.height(8.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        qr?.let {
+            androidx.compose.foundation.Image(
+                it.asImageBitmap(), "companion download QR",
+                Modifier.size(150.dp).clip(RoundedCornerShape(8.dp)))
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(url, style = MaterialTheme.typography.bodyMedium, color = HelmColors.Cyan)
+            Text("API  http://${wg ?: "10.255.1.6"}:${com.xterra.helm.system.ApiServer.PORT}/api/status",
+                style = MaterialTheme.typography.labelSmall, color = HelmColors.TextDim)
+            Text("CAM  rtsp://${wg ?: "10.255.1.6"}:${com.xterra.helm.system.RtspRelay.PORT}/live",
+                style = MaterialTheme.typography.labelSmall, color = HelmColors.TextDim)
         }
     }
 }

@@ -293,6 +293,14 @@ private fun TiltGauge(deg: Float, rearView: Boolean, gForce: Float, modifier: Mo
             }
         }
 
+        // Indicator needle, drawn BEFORE the truck so the body occludes the
+        // shaft — only the tip pokes above the roofline. Rotates with the
+        // vehicle so its tip sweeps the fixed scale as the angle changes.
+        rotate(deg, pivot = c) {
+            drawLine(severity(deg), c, c + Offset(0f, -r + 6.dp.toPx()),
+                strokeWidth = 3.5f, cap = StrokeCap.Round)
+        }
+
         // The truck, rotated with the vehicle. Real artwork when the asset
         // exists; schematic outline otherwise. Sized to clear the tick
         // labels and anchored with the axle line on the horizon (wheel hubs
@@ -314,13 +322,6 @@ private fun TiltGauge(deg: Float, rearView: Boolean, gForce: Float, modifier: Mo
                 )
             } else if (rearView) drawTruckRear(c, r * 0.82f, severity(deg))
             else drawTruckSide(c, r * 0.82f, severity(deg))
-        }
-
-        // Needle drawn over the truck so the pointer never hides behind
-        // the artwork.
-        rotate(deg, pivot = c) {
-            drawLine(severity(deg), c, c + Offset(0f, -r + 6.dp.toPx()),
-                strokeWidth = 3.5f, cap = StrokeCap.Round)
         }
     }
 }

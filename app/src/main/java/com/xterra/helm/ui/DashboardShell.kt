@@ -21,6 +21,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.xterra.helm.HelmApp
@@ -261,6 +262,10 @@ private fun Dock(panes: PaneManager) {
                 if (panes.right != null) panes.right = w else panes.left = w
             }
         }
+        // Volume controls, centered in the dock's empty middle — a distinct
+        // grouped module, set apart from the pane chips and split controls.
+        Spacer(Modifier.weight(1f))
+        VolumeGroup()
         Spacer(Modifier.weight(1f))
         DockChip(
             when (HelmThemeState.mode) {
@@ -274,6 +279,77 @@ private fun Dock(panes: PaneManager) {
         DockChip(if (panes.right == null) "SPLIT" else "SINGLE", panes.right != null) {
             if (panes.right == null) panes.right = Widget.MEDIA else panes.closeRight()
         }
+    }
+}
+
+/**
+ * One distinct pill in the dock's centre: a media-volume stepper (−/level/+
+ * on STREAM_MUSIC) adjoining the transport controls (prev / play-pause / next)
+ * for whatever's playing. The volume readout polls so it tracks hardware keys;
+ * the transport binds to the active MediaSession and dims when nothing plays.
+ */
+@Composable
+private fun VolumeGroup() {
+    val ctx = LocalContext.current
+    val am = remember {
+        ctx.getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
+    }
+    val music = android.media.AudioManager.STREAM_MUSIC
+    var vol by remember { mutableStateOf(volPct(am, music)) }
+    LaunchedEffect(Unit) { while (true) { vol = volPct(am, music); delay(1500) } }
+    fun bump(up: Boolean) {
+        am.adjustStreamVolume(music,
+            if (up) android.media.AudioManager.ADJUST_RAISE
+            else android.media.AudioManager.ADJUST_LOWER, 0)
+        vol = volPct(am, music)
+    }
+    val repo = HelmApp.instance.media
+    val np by repo.active.collectAsState()
+    val hasSession = np.packageName.isNotEmpty()
+
+    Row(
+        Modifier.clip(RoundedCornerShape(12.dp))
+            .background(HelmColors.Glass.copy(alpha = 0.65f))
+            .border(1.dp, HelmColors.PanelEdge, RoundedCornerShape(12.dp))
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text("VOL", style = MaterialTheme.typography.labelSmall, color = HelmColors.TextDim)
+        VolBtn(Icons.Filled.Remove, enabled = true) { bump(false) }
+        Text("%d%%".format(vol), style = MaterialTheme.typography.labelSmall,
+            color = HelmColors.Cyan, modifier = Modifier.widthIn(min = 34.dp))
+        VolBtn(Icons.Filled.Add, enabled = true) { bump(true) }
+
+        Box(Modifier.width(1.dp).height(26.dp).background(HelmColors.PanelEdge))
+
+        VolBtn(Icons.Filled.SkipPrevious, enabled = hasSession) { repo.prev(np.packageName) }
+        VolBtn(if (np.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+            enabled = hasSession) { repo.playPause(np.packageName) }
+        VolBtn(Icons.Filled.SkipNext, enabled = hasSession) { repo.next(np.packageName) }
+    }
+}
+
+private fun volPct(am: android.media.AudioManager, stream: Int): Int {
+    val max = am.getStreamMaxVolume(stream).coerceAtLeast(1)
+    return am.getStreamVolume(stream) * 100 / max
+}
+
+@Composable
+private fun VolBtn(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    Box(
+        Modifier.size(34.dp).clip(RoundedCornerShape(8.dp))
+            .background(HelmColors.Panel)
+            .clickable(enabled = enabled) { onClick() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, null,
+            tint = if (enabled) HelmColors.Amber else HelmColors.TextDim.copy(alpha = 0.4f),
+            modifier = Modifier.size(20.dp))
     }
 }
 

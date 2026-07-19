@@ -97,5 +97,8 @@ dependencies {
     // Local-LAN only — no external endpoints.
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
+    // QR generation for the companion-app download link (pure-Java, offline).
+    implementation("com.google.zxing:core:3.5.3")
+
     testImplementation("junit:junit:4.13.2")
 }

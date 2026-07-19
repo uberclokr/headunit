@@ -30,6 +30,10 @@
         <package android:name="com.google.android.apps.maps" />
         <package android:name="net.osmand.plus" />
         <intent><action android:name="android.intent.action.MAIN" /></intent>
+        <!-- See every installed audio app for the media launcher grid. -->
+        <intent>
+            <action android:name="android.media.browse.MediaBrowserService" />
+        </intent>
     </queries>
 
     <application

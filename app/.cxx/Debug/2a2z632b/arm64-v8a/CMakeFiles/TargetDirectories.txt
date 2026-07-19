@@ -1,5 +1,0 @@
-/home/phill/Desktop/Projects/headunit/app/.cxx/Debug/2a2z632b/arm64-v8a/CMakeFiles/usb.dir
-/home/phill/Desktop/Projects/headunit/app/.cxx/Debug/2a2z632b/arm64-v8a/CMakeFiles/rtlsdr.dir
-/home/phill/Desktop/Projects/headunit/app/.cxx/Debug/2a2z632b/arm64-v8a/CMakeFiles/helmrtl.dir
-/home/phill/Desktop/Projects/headunit/app/.cxx/Debug/2a2z632b/arm64-v8a/CMakeFiles/edit_cache.dir
-/home/phill/Desktop/Projects/headunit/app/.cxx/Debug/2a2z632b/arm64-v8a/CMakeFiles/rebuild_cache.dir

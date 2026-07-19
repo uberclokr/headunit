@@ -178,6 +178,8 @@
   },
   "active": "b603340f9545624c",
   "lastOpenFiles": [
+    "docs/HANDOFF.md",
+    "docs/HANDOFF.md.tmp.112171.0f6d8184501e",
     "app/build/intermediates/dex/debug/mergeExtDexDebug/classes.dex",
     "app/build/intermediates/dex/debug/mergeExtDexDebug/classes3.dex",
     "app/build/intermediates/dex/debug/mergeExtDexDebug/classes2.dex",
@@ -187,8 +189,6 @@
     "app/build/intermediates/project_dex_archive/debug/dexBuilderDebug/out/com/xterra/helm/system/RtspRelay.dex",
     "app/build/intermediates/project_dex_archive/debug/dexBuilderDebug/out/com/xterra/helm/system/QrCode.dex",
     "app/build/intermediates/project_dex_archive/debug/dexBuilderDebug/out/com/xterra/helm/system/ApiServer.dex",
-    "app/build/kotlin/compileDebugKotlin/cacheable/dirty-sources.txt",
-    "app/build/tmp/kotlin-classes/debug/META-INF/app_debug.kotlin_module",
     "app/build/intermediates/assets/debug/mergeDebugAssets/xterra_side.png",
     "app/build/intermediates/assets/debug/mergeDebugAssets/xterra_rear.png",
     "app/src/main/assets/xterra_side.png",

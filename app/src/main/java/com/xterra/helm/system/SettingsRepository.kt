@@ -52,6 +52,11 @@ data class HelmSettings(
     // settings pane for if the unit is ever remounted.
     val tiltInvertRoll: Boolean = true,
     val tiltInvertPitch: Boolean = true,
+    // Starlink plan: monthly data cap in GB (0 = no cap shown) and the billing
+    // cycle reset day-of-month. Usage itself is integrated from the dish
+    // locally (NetRepository); these just supply the denominator + reset date.
+    val starlinkCapGb: Float = 100f,
+    val starlinkAnchorDay: Int = 24,
 )
 
 private val Context.dataStore by preferencesDataStore("helm_settings")
@@ -88,6 +93,8 @@ class SettingsRepository(context: Context) {
             tiltCal = p[TILT_CAL] ?: "",
             tiltInvertRoll = p[TILT_INV_ROLL] ?: HelmSettings().tiltInvertRoll,
             tiltInvertPitch = p[TILT_INV_PITCH] ?: HelmSettings().tiltInvertPitch,
+            starlinkCapGb = p[SL_CAP_GB] ?: HelmSettings().starlinkCapGb,
+            starlinkAnchorDay = p[SL_ANCHOR] ?: HelmSettings().starlinkAnchorDay,
         )
     }
 
@@ -132,6 +139,15 @@ class SettingsRepository(context: Context) {
         scope.launch { ds.edit { it[TILT_INV_ROLL] = roll; it[TILT_INV_PITCH] = pitch } }
     }
 
+    fun setStarlinkPlan(anchorDay: Int, capGb: Float) {
+        scope.launch {
+            ds.edit {
+                it[SL_ANCHOR] = anchorDay.coerceIn(1, 28)
+                it[SL_CAP_GB] = capGb.coerceAtLeast(0f)
+            }
+        }
+    }
+
     fun setPaneLayout(left: String, right: String, split: Float) {
         scope.launch {
             ds.edit { it[PANE_L] = left; it[PANE_R] = right; it[PANE_SPLIT] = split }
@@ -160,6 +176,8 @@ class SettingsRepository(context: Context) {
         private val TILT_CAL = stringPreferencesKey("tilt_cal")
         private val TILT_INV_ROLL = booleanPreferencesKey("tilt_inv_roll")
         private val TILT_INV_PITCH = booleanPreferencesKey("tilt_inv_pitch")
+        private val SL_CAP_GB = floatPreferencesKey("starlink_cap_gb")
+        private val SL_ANCHOR = intPreferencesKey("starlink_anchor_day")
         private val ZOOMS = listOf(
             doublePreferencesKey("nav_zoom_1"),
             doublePreferencesKey("nav_zoom_2"),

@@ -137,6 +137,26 @@ fun SettingsWidget() {
         }
 
         Spacer(Modifier.height(10.dp))
+        Text("STARLINK DATA  (plan)",
+            style = MaterialTheme.typography.titleMedium, color = HelmColors.Amber)
+        // Usage is measured locally off the dish; these two set the cap
+        // denominator and when the billing cycle resets (dish can't report
+        // them). 0 GB = show usage with no cap.
+        var slCap by remember(s.starlinkCapGb) {
+            mutableStateOf(if (s.starlinkCapGb > 0f) "%.0f".format(s.starlinkCapGb) else "0")
+        }
+        var slDay by remember(s.starlinkAnchorDay) { mutableStateOf(s.starlinkAnchorDay.toString()) }
+        Field("Monthly cap (GB, 0 = no cap)", slCap, KeyboardType.Number) { slCap = it }
+        Field("Cycle reset day (1–28)", slDay, KeyboardType.Number) { slDay = it }
+        Btn("SAVE", primary = true) {
+            val cap = slCap.trim().toFloatOrNull()?.coerceAtLeast(0f) ?: 0f
+            val day = slDay.trim().toIntOrNull()?.coerceIn(1, 28) ?: 24
+            HelmApp.instance.settings.setStarlinkPlan(day, cap)
+            slCap = "%.0f".format(cap); slDay = day.toString()
+            status = "Starlink plan saved — ${cap.toInt()} GB, resets day $day"
+        }
+
+        Spacer(Modifier.height(10.dp))
         Text("REVERSE CAMERA",
             style = MaterialTheme.typography.titleMedium, color = HelmColors.Amber)
         Btn(if (s.revMirror) "OVERLAY MIRRORED (rear-view sense) — tap to unmirror"

@@ -39,7 +39,7 @@ data class NetStatus(
     val usageCycleStartEpochDay: Long = 0,
 )
 
-class NetRepository(context: Context) {
+class NetRepository(context: Context, private val settings: SettingsRepository) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val _state = MutableStateFlow(NetStatus())
@@ -49,8 +49,7 @@ class NetRepository(context: Context) {
 
     private val usageStore = UsageStore(context)
     private val usage = UsageAccumulator()
-    @Volatile private var cycleStartEpochDay = 0L
-    @Volatile private var config = UsageConfig()
+    private var cycleStartEpochDay = 0L
 
     fun start() = scope.launch {
         // Dish bypass: via the wlan0 gateway, main table, beats the tun0 rule.
@@ -60,10 +59,9 @@ class NetRepository(context: Context) {
             "ip rule add to 192.168.100.1/32 lookup main pref 5001")
 
         // Restore persisted usage before the first poll so we continue, not reset.
-        val (persisted, cfg) = usageStore.load()
+        val persisted = usageStore.load()
         usage.restore(persisted.totalBytes, persisted.lastCurrent)
         cycleStartEpochDay = persisted.cycleStartEpochDay
-        config = cfg
 
         var cycle = 0
         while (isActive) {
@@ -74,8 +72,13 @@ class NetRepository(context: Context) {
             val ping = RootShell.run("ping -c1 -W2 1.1.1.1 2>/dev/null")
                 ?.let { Regex("""time=([\d.]+)""").find(it)?.groupValues?.get(1)?.toFloatOrNull() }
 
-            // Roll the billing cycle over if we've crossed the anchor day.
-            val cs = cycleStartFor(LocalDate.now(), config.anchorDay).toEpochDay()
+            // Plan cap + reset day come from settings (editable in the pane).
+            val cfg = settings.state.value
+            val capGb = cfg.starlinkCapGb.takeIf { it > 0f }
+
+            // Roll the billing cycle over if we've crossed the anchor day (or
+            // the anchor was edited to define a different cycle boundary).
+            val cs = cycleStartFor(LocalDate.now(), cfg.starlinkAnchorDay).toEpochDay()
             if (cs != cycleStartEpochDay) {
                 usage.resetCycle()
                 cycleStartEpochDay = cs
@@ -101,26 +104,12 @@ class NetRepository(context: Context) {
                 inetMs = ping?.toInt(),
                 dish = StarlinkClient.getStatus(),
                 usageBytes = usage.totalBytes,
-                usageCapGb = config.capGb,
+                usageCapGb = capGb,
                 usageCycleStartEpochDay = cycleStartEpochDay,
             )
             cycle++
             delay(10_000)
         }
-    }
-
-    /** Set the (manual) plan cap + billing anchor day; persists + applies live. */
-    fun setUsageConfig(anchorDay: Int, capGb: Float?) = scope.launch {
-        usageStore.setConfig(anchorDay, capGb)
-        config = UsageConfig(anchorDay.coerceIn(1, 28), capGb?.takeIf { it > 0f })
-        // Re-evaluate the cycle boundary against the new anchor immediately.
-        val cs = cycleStartFor(LocalDate.now(), config.anchorDay).toEpochDay()
-        if (cs != cycleStartEpochDay) {
-            usage.resetCycle(); cycleStartEpochDay = cs
-            usageStore.save(UsagePersist(usage.totalBytes, usage.snapshot().second, cs))
-        }
-        _state.value = _state.value.copy(
-            usageCapGb = config.capGb, usageCycleStartEpochDay = cycleStartEpochDay)
     }
 
     /**

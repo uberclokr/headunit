@@ -89,13 +89,16 @@ object ApiServer {
                 }
             }
             path.startsWith("/api/usage/config") -> {
-                // Manual plan cap + billing anchor (the dish can't report them):
-                //   /api/usage/config?anchorDay=14&capGb=50
-                val anchor = Regex("""anchorDay=(\d+)""").find(path)?.groupValues?.get(1)?.toIntOrNull()
-                val cap = Regex("""capGb=([\d.]+)""").find(path)?.groupValues?.get(1)?.toFloatOrNull()
-                HelmApp.instance.net.setUsageConfig(anchor ?: 1, cap)
-                val body = """{"ok":true,"anchorDay":${anchor ?: 1},"capGb":${cap ?: "null"}}"""
-                    .toByteArray()
+                // Manual plan cap + billing anchor (the dish can't report them);
+                // same store the settings pane writes to:
+                //   /api/usage/config?anchorDay=24&capGb=100
+                val s = HelmApp.instance.settings.state.value
+                val anchor = Regex("""anchorDay=(\d+)""").find(path)?.groupValues?.get(1)
+                    ?.toIntOrNull() ?: s.starlinkAnchorDay
+                val cap = Regex("""capGb=([\d.]+)""").find(path)?.groupValues?.get(1)
+                    ?.toFloatOrNull() ?: s.starlinkCapGb
+                HelmApp.instance.settings.setStarlinkPlan(anchor, cap)
+                val body = """{"ok":true,"anchorDay":$anchor,"capGb":$cap}""".toByteArray()
                 out.write(head(200, "application/json", body.size)); out.write(body)
             }
             path.startsWith("/companion.apk") -> {

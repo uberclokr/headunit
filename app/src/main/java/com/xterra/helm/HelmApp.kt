@@ -54,7 +54,7 @@ class HelmApp : Application() {
         gps = com.xterra.helm.nav.GpsRepository(this)
         poi = com.xterra.helm.nav.PoiStore(this)
         settings = com.xterra.helm.system.SettingsRepository(this)
-        net = com.xterra.helm.system.NetRepository(this)
+        net = com.xterra.helm.system.NetRepository(this, settings)
         tilt = com.xterra.helm.system.TiltRepository(this, settings)
         // Kick the always-on vehicle service (CAN poll + reverse watch).
         startForegroundService(Intent(this, VehicleService::class.java))

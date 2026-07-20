@@ -53,6 +53,16 @@ class VehicleService : LifecycleService() {
         }
     }
 
+    // Starlink dish gRPC probe: dump a raw response for a given Request field
+    // to discover what the live dish exposes (e.g. get_history for usage):
+    //   adb shell am broadcast -a com.xterra.helm.SL_DUMP --ei field 1005
+    // Result lands in `logcat -s Helm` as an "SL dump" line.
+    private val slDump = object : BroadcastReceiver() {
+        override fun onReceive(c: Context?, i: Intent?) {
+            HelmApp.instance.net.dumpDish(i?.getIntExtra("field", 1005) ?: 1005)
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         startForeground(NOTIF_ID, notification())
@@ -60,6 +70,7 @@ class VehicleService : LifecycleService() {
         registerReceiver(bleScan, IntentFilter("com.xterra.helm.BLE_SCAN"), RECEIVER_EXPORTED)
         registerReceiver(renProbe, IntentFilter("com.xterra.helm.REN_DUMP"), RECEIVER_EXPORTED)
         registerReceiver(renProbe, IntentFilter("com.xterra.helm.REN_REG"), RECEIVER_EXPORTED)
+        registerReceiver(slDump, IntentFilter("com.xterra.helm.SL_DUMP"), RECEIVER_EXPORTED)
         HelmApp.instance.can.start()
         HelmApp.instance.media.start()
         HelmApp.instance.homeLink.start()

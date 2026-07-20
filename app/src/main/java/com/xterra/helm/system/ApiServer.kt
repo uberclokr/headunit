@@ -88,6 +88,16 @@ object ApiServer {
                     out.write(head(400, "application/json", body.size)); out.write(body)
                 }
             }
+            path.startsWith("/api/usage/config") -> {
+                // Manual plan cap + billing anchor (the dish can't report them):
+                //   /api/usage/config?anchorDay=14&capGb=50
+                val anchor = Regex("""anchorDay=(\d+)""").find(path)?.groupValues?.get(1)?.toIntOrNull()
+                val cap = Regex("""capGb=([\d.]+)""").find(path)?.groupValues?.get(1)?.toFloatOrNull()
+                HelmApp.instance.net.setUsageConfig(anchor ?: 1, cap)
+                val body = """{"ok":true,"anchorDay":${anchor ?: 1},"capGb":${cap ?: "null"}}"""
+                    .toByteArray()
+                out.write(head(200, "application/json", body.size)); out.write(body)
+            }
             path.startsWith("/companion.apk") -> {
                 val f = File(HelmApp.instance.filesDir, "companion.apk")
                 if (f.isFile) {
@@ -151,6 +161,8 @@ object ApiServer {
                 "staSsid" to net.staSsid, "staRssi" to net.staRssi,
                 "apUp" to net.apUp, "apClients" to net.apClients,
                 "inetMs" to net.inetMs,
+                "usageBytes" to net.usageBytes, "usageCapGb" to net.usageCapGb,
+                "usageCycleStartEpochDay" to net.usageCycleStartEpochDay,
                 "wgReachable" to home.reachable, "wgMs" to home.latencyMs,
                 "dish" to net.dish?.let { d ->
                     mapOf("uptimeS" to d.uptimeS, "latencyMs" to d.latencyMs,

@@ -46,6 +46,14 @@ fun NetWidget() {
             if (d.alertCount > 0) NetRow("ALERTS", "${d.alertCount} active", alert = true)
             else NetRow("ALERTS", "none")
         }
+        // Usage this billing cycle — integrated locally from the dish's
+        // throughput ring (no subscription data spent). Denominator only if a
+        // cap is configured; the dish itself can't report the plan cap.
+        val usedGb = net.usageBytes / 1e9
+        NetRow("DATA (CYCLE)", net.usageCapGb?.let {
+            "%.1f / %.0f GB · %.0f%%".format(usedGb, it, (usedGb / it * 100).coerceAtMost(999.0))
+        } ?: "%.1f GB".format(usedGb),
+            alert = net.usageCapGb?.let { usedGb >= it } == true)
 
         Spacer(Modifier.height(6.dp))
         Text("WIFI", style = MaterialTheme.typography.titleMedium, color = HelmColors.Amber)

@@ -41,6 +41,21 @@ object StarlinkClient {
         val alertCount: Int = 0,
     )
 
+    /**
+     * A get_history snapshot. `current` is the dish's monotonic sample index
+     * (total per-second samples since boot); the arrays are a circular buffer
+     * of the last N seconds of throughput. There is no usage/byte counter in
+     * the API — usage is derived by integrating these (see [UsageAccumulator]).
+     * Field numbers from device.proto: get_history req=1007, resp oneof 2006;
+     * DishGetHistoryResponse.current=1, downlink_throughput_bps=1003,
+     * uplink_throughput_bps=1004.
+     */
+    data class DishHistory(
+        val current: Long,
+        val downlinkBps: FloatArray,
+        val uplinkBps: FloatArray,
+    )
+
     private val http = OkHttpClient.Builder()
         .protocols(listOf(Protocol.H2_PRIOR_KNOWLEDGE))
         .connectTimeout(2, TimeUnit.SECONDS)
@@ -67,6 +82,103 @@ object StarlinkClient {
             parse(body.copyOfRange(5, body.size))
         }
     }.getOrNull()
+
+    /** One get_history round-trip; null when unreachable/unparseable. */
+    fun getHistory(host: String = "192.168.100.1"): DishHistory? = runCatching {
+        // Request.get_history = field 1007: tag=(1007<<3)|2=8058 → varint FA 3E,
+        // then an empty sub-message (len 0).
+        val pb = byteArrayOf(0xFA.toByte(), 0x3E, 0x00)
+        val frame = byteArrayOf(0, 0, 0, 0, pb.size.toByte()) + pb
+        http.newCall(
+            Request.Builder()
+                .url("http://$host:9200/SpaceX.API.Device.Device/Handle")
+                .addHeader("te", "trailers")
+                .post(frame.toRequestBody("application/grpc".toMediaType()))
+                .build()
+        ).execute().use {
+            val body = it.body?.bytes() ?: return null
+            if (body.size < 5) return null
+            parseHistory(body.copyOfRange(5, body.size))
+        }
+    }.getOrNull()
+
+    private fun parseHistory(msg: ByteArray): DishHistory? {
+        val root = PbReader(msg)
+        while (root.hasMore()) {
+            val (f, w) = root.tag() ?: break
+            if (f == 2006 && w == 2) {              // Response.dish_get_history
+                val h = root.sub() ?: return null
+                var current = 0L
+                var down = FloatArray(0)
+                var up = FloatArray(0)
+                while (h.hasMore()) {
+                    val (hf, hw) = h.tag() ?: break
+                    when {
+                        hf == 1 && hw == 0 -> current = h.varint()
+                        hf == 1003 && hw == 2 -> down = h.packedFloats()
+                        hf == 1004 && hw == 2 -> up = h.packedFloats()
+                        else -> h.skip(hw)
+                    }
+                }
+                return DishHistory(current, down, up)
+            } else root.skip(w)
+        }
+        return null
+    }
+
+    /**
+     * Debug probe: send an empty Request with an arbitrary field number and
+     * return the raw response as a shallow field walk + hex head. Lets us see
+     * exactly what a live dish exposes for a method (e.g. get_history=1005)
+     * before committing a parser — local protos vary by firmware, so we
+     * verify against the hardware rather than hardcode. Triggered by the
+     * SL_DUMP broadcast (see VehicleService); results land in logcat.
+     */
+    fun dump(requestField: Int, host: String = "192.168.100.1"): String = runCatching {
+        var tag = (requestField shl 3) or 2          // wiretype 2 (LEN)
+        val tb = ArrayList<Byte>()
+        while (true) {
+            val b = tag and 0x7F; tag = tag ushr 7
+            if (tag != 0) tb.add((b or 0x80).toByte()) else { tb.add(b.toByte()); break }
+        }
+        val pb = tb.toByteArray() + 0x00             // empty sub-message
+        val frame = byteArrayOf(0, 0, 0, 0, pb.size.toByte()) + pb
+        http.newCall(
+            Request.Builder()
+                .url("http://$host:9200/SpaceX.API.Device.Device/Handle")
+                .addHeader("te", "trailers")
+                .post(frame.toRequestBody("application/grpc".toMediaType()))
+                .build()
+        ).execute().use { resp ->
+            val body = resp.body?.bytes() ?: return@runCatching "http=${resp.code} <no body>"
+            if (body.size < 5) return@runCatching "http=${resp.code} short=${body.size}B"
+            val msg = body.copyOfRange(5, body.size)
+            "http=${resp.code} len=${msg.size}\n  walk: ${walk(msg)}\n  hex: " +
+                msg.take(700).joinToString("") { "%02x".format(it) }
+        }
+    }.getOrElse { "dump error: ${it.message}" }
+
+    /** Shallow (one level deep) protobuf field map for the probe. */
+    private fun walk(msg: ByteArray, depth: Int = 0): String {
+        val r = PbReader(msg); val sb = StringBuilder(); var n = 0
+        while (r.hasMore() && n++ < 48) {
+            val (f, w) = r.tag() ?: break
+            when (w) {
+                0 -> sb.append("$f=${r.varint()} ")
+                5 -> sb.append("$f:f32=${"%.0f".format(r.float())} ")
+                1 -> { r.skip(1); sb.append("$f:f64 ") }
+                2 -> {
+                    val s = r.sub() ?: run { sb.append("$f:len? "); return sb.toString().trim() }
+                    val len = s.remaining()
+                    if (depth < 1 && len in 1..600)
+                        sb.append("$f:{${walk(s.rangeCopy(), depth + 1)}} ")
+                    else sb.append("$f:len$len ")     // big len ≈ packed float array
+                }
+                else -> { r.skip(w); sb.append("$f:? ") }
+            }
+        }
+        return sb.toString().trim()
+    }
 
     private fun parse(msg: ByteArray): DishStatus? {
         var status = DishStatus()
@@ -130,6 +242,17 @@ object StarlinkClient {
     private class PbReader(private val b: ByteArray, private var p: Int = 0,
                            private val end: Int = b.size) {
         fun hasMore() = p < end
+        fun remaining() = end - p
+        fun rangeCopy() = b.copyOfRange(p, end)
+
+        /** A length-delimited field of packed little-endian float32s. */
+        fun packedFloats(): FloatArray {
+            val stop = (p + varint().toInt()).coerceAtMost(end)
+            val out = ArrayList<Float>((stop - p) / 4)
+            while (p + 4 <= stop) out.add(float())
+            p = stop
+            return out.toFloatArray()
+        }
 
         fun varint(): Long {
             var v = 0L; var shift = 0

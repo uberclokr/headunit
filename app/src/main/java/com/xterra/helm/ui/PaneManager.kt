@@ -16,6 +16,7 @@ enum class Widget(val label: String) {
     NET("NET"),
     INCLINE("TILT"),
     SNIFFER("CAN RAW"),
+    LORA("LORA"),
     SETTINGS("SETTINGS"),
 }
 

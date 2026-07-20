@@ -17,6 +17,7 @@ fun WidgetContent(w: Widget) {
         Widget.NET        -> NetWidget()
         Widget.INCLINE    -> InclineWidget()
         Widget.SNIFFER    -> SnifferWidget()
+        Widget.LORA       -> LoraWidget()
         Widget.SETTINGS   -> SettingsWidget()
         Widget.CAM_THERMAL-> ThermalView()
         Widget.CAM_REAR   -> CamWidget()

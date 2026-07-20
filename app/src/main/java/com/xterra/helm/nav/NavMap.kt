@@ -73,6 +73,9 @@ fun NavMap() {
     // Waypoints (GeoJSON) + the currently tapped one (id to name).
     val pois by HelmApp.instance.poi.pois.collectAsState()
     var selected by remember { mutableStateOf<Pair<String, String>?>(null) }
+    // LoRaWAN tracker nodes — shown as green dots when the LNS is enabled.
+    val loraStates by HelmApp.instance.lora.states.collectAsState()
+    val loraCfg by HelmApp.instance.lora.config.collectAsState()
     // Offline region-download progress text + region manager visibility.
     var cacheMsg by remember { mutableStateOf<String?>(null) }
     var showRegions by remember { mutableStateOf(false) }
@@ -92,6 +95,12 @@ fun NavMap() {
     // Push waypoint changes into the map's GeoJSON source live.
     LaunchedEffect(pois) {
         mapRef.value?.style?.getSourceAs<GeoJsonSource>(POI_SRC)?.setGeoJson(pois)
+    }
+
+    // Push LoRa node positions live (cleared when the LNS is off).
+    LaunchedEffect(loraStates, loraCfg.enabled) {
+        mapRef.value?.style?.getSourceAs<GeoJsonSource>(LORA_SRC)
+            ?.setGeoJson(loraGeoJson(if (loraCfg.enabled) loraStates else emptyList()))
     }
 
     // MapLibre must be initialized before any MapView is created. Keyless.
@@ -346,12 +355,35 @@ private fun applyStyle(ctx: Context, map: MapLibreMap, base: MapStyles.Base) {
             PropertyFactory.circleStrokeColor("#FFFFFF"),
             PropertyFactory.circleStrokeWidth(2f),
         ))
+        // LoRa tracker nodes: green dots, distinct from amber waypoints.
+        style.addSource(GeoJsonSource(LORA_SRC,
+            loraGeoJson(HelmApp.instance.lora.states.value
+                .takeIf { HelmApp.instance.lora.config.value.enabled } ?: emptyList())))
+        style.addLayer(CircleLayer(LORA_LAYER, LORA_SRC).withProperties(
+            PropertyFactory.circleColor("#4ADE80"),
+            PropertyFactory.circleRadius(7f),
+            PropertyFactory.circleStrokeColor("#0B0F14"),
+            PropertyFactory.circleStrokeWidth(2f),
+        ))
         if (hasLocationPermission(ctx)) enableLocation(ctx, map, style)
     }
 }
 
+/** GeoJSON FeatureCollection string for the LoRa nodes that have a fix. */
+private fun loraGeoJson(states: List<com.xterra.helm.lora.LoraNodeState>): String {
+    val feats = states.mapNotNull { s ->
+        val p = s.pos ?: return@mapNotNull null
+        val label = s.label.replace("\\", "\\\\").replace("\"", "\\\"")
+        """{"type":"Feature","properties":{"label":"$label"},""" +
+            """"geometry":{"type":"Point","coordinates":[${p.lon},${p.lat}]}}"""
+    }.joinToString(",")
+    return """{"type":"FeatureCollection","features":[$feats]}"""
+}
+
 private const val POI_SRC = "helm-pois"
 private const val POI_LAYER = "helm-poi-dots"
+private const val LORA_SRC = "helm-lora"
+private const val LORA_LAYER = "helm-lora-dots"
 
 /**
  * Download the current viewport for offline use. Frame the area, tap the

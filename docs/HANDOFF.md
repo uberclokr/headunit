@@ -146,7 +146,32 @@ style: terse subject + feature-grouped body + Claude trailers.
    as reference — separate problem, same pipeline. The `AudioRecord` source
    mode must be confirmed on the actual Edge2 image before wiring capture;
    the DSP core needs no hardware until final tuning.
-3. **Thermal (UVC) camera** — parked; the `libausbc` JitPack dependency is
+3. **Viofo cabin feed as a system camera (webcam)** — backburner #3, scoped
+   2026-07-20. Goal: expose the cabin channel as a camera that arbitrary
+   video-comms apps enumerate (the "integrated / USB camera" they look for).
+   Not an app feature — it's HAL/kernel integration, viable here only because
+   we own the image + root + rebuild kernels:
+   - **Path (recommended): `v4l2loopback` + the AOSP External Camera HAL.**
+     Android already turns USB UVC webcams into `LENS_FACING_EXTERNAL`
+     cameras; feed that same path. Build/load `v4l2loopback` → a userspace
+     pump (ffmpeg/GStreamer, Rockchip `rkmpp` HW H.264 decode) writes the
+     Viofo RTSP into `/dev/videoN` → External HAL enumerates it for all apps.
+     Verify the AOSP external provider is present/enabled on the image and
+     add a SELinux rule for the HAL to open the loopback node.
+   - Alt: Android-14 VirtualCamera API — sanctioned but `CREATE_VIRTUAL_DEVICE`
+     is signature/role-gated (we can meet it) and primary-display visibility
+     to normally-launched apps is the risk; prefer the loopback route.
+   - **Audio is separate.** Cameras carry no audio in Android; expose it as a
+     distinct audio-input device (ALSA loopback + audio HAL) — or, cleaner,
+     pair the virtual cam with the head unit's own mic (ties to open item #2).
+     Owner's call 2026-07-20: **split the Viofo audio into its own audio
+     stream device and add a manual A/V-sync slider** for when latency can't
+     be auto-determined.
+   - Constraints: A329S serves ONE live channel at a time (contends with the
+     CAM pane / reverse cam) — but overriding the CAM widget during an active
+     call is acceptable (owner: no reverse cam needed mid-call); dashcam
+     encode + Wi-Fi + decode latency is "webcam-fine," not low-latency.
+4. **Thermal (UVC) camera** — parked; the `libausbc` JitPack dependency is
    broken and needs re-sourcing before `ThermalView` can build for real.
-4. Config still partly inline (some constants) vs. the settings panel —
+5. Config still partly inline (some constants) vs. the settings panel —
    ongoing migration, not urgent.

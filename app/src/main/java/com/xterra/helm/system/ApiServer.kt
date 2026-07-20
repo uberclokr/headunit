@@ -15,7 +15,9 @@ import java.net.Socket
  *
  *   GET /               tiny landing page linking the companion APK
  *   GET /api/status     JSON snapshot of gps / ecm / battery / net / tilt / cam
- *   GET /api/cam/channel?ch=N   switch the Viofo live channel (0/1/2)
+ *   GET /api/cam/channel?ch=N   lease the Viofo live channel (0/1/2); the
+ *                       companion re-calls it as a keepalive while viewing,
+ *                       and it reverts to rear ~5 s after the calls stop
  *   GET /companion.apk  the companion app binary (filesDir/companion.apk,
  *                       pushed at build time; 404 until it exists)
  *
@@ -57,7 +59,10 @@ object ApiServer {
             path.startsWith("/api/cam/channel") -> {
                 val ch = Regex("""ch=(\d)""").find(path)?.groupValues?.get(1)?.toIntOrNull()
                 if (ch in 0..2) {
-                    HelmApp.instance.viofo.selectPaneChannel(ch!!)
+                    // Lease-based, not sticky: holds the companion's channel
+                    // while it keeps calling, reverts to rear ~5 s after it
+                    // stops (ViofoLocator.requestCompanionChannel).
+                    HelmApp.instance.viofo.requestCompanionChannel(ch!!)
                     val body = """{"ok":true,"ch":$ch}""".toByteArray()
                     out.write(head(200, "application/json", body.size)); out.write(body)
                 } else {

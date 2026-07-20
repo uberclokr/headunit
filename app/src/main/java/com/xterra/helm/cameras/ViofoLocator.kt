@@ -57,30 +57,48 @@ class ViofoLocator(private val registry: CameraRegistry) {
     private var pinnedIp: String? = null
     private var pinnedIface = "wlan1"     // interface the current pin routes via
 
-    fun start() = scope.launch {
-        while (isActive) {
-            val ip = _state.value.ip
-            if (ip != null && (heartbeat(ip) || run { delay(2_000); heartbeat(ip) })) {
-                _state.value = _state.value.copy(
-                    reachable = true, lastOkAtMs = System.currentTimeMillis())
-                delay(heartbeatMs)
-                continue
+    fun start() {
+        scope.launch {
+            while (isActive) {
+                val ip = _state.value.ip
+                if (ip != null && (heartbeat(ip) || run { delay(2_000); heartbeat(ip) })) {
+                    _state.value = _state.value.copy(
+                        reachable = true, lastOkAtMs = System.currentTimeMillis())
+                    delay(heartbeatMs)
+                    continue
+                }
+                if (_state.value.reachable) Log.i(TAG, "Viofo heartbeat lost, rediscovering")
+                _state.value = _state.value.copy(reachable = false)
+                val found = discover()
+                // Camera asleep (parking mode) is the common case — don't hammer
+                // the AP with back-to-back sweeps; it shares air with the WG link.
+                if (found == null) { delay(60_000); continue }
+                val (foundIp, foundMac, foundIface) = found
+                pin(foundIp, foundMac, foundIface)
+                registry.retarget(foundIp)
+                // One camera, one live source: default to rear so the stream is
+                // always backup-ready. Verified on A329S fw V1.3: cmd 3028
+                // par 0=front 1=interior 2=rear 5=three-channel composite.
+                setLiveSource(foundIp, CH_REAR)
+                _state.value = ViofoLink(foundIp, foundMac, true, System.currentTimeMillis())
+                Log.i(TAG, "Viofo at $foundIp ($foundMac), pinned off-VPN via $foundIface")
             }
-            if (_state.value.reachable) Log.i(TAG, "Viofo heartbeat lost, rediscovering")
-            _state.value = _state.value.copy(reachable = false)
-            val found = discover()
-            // Camera asleep (parking mode) is the common case — don't hammer
-            // the AP with back-to-back sweeps; it shares air with the WG link.
-            if (found == null) { delay(60_000); continue }
-            val (foundIp, foundMac, foundIface) = found
-            pin(foundIp, foundMac, foundIface)
-            registry.retarget(foundIp)
-            // One camera, one live source: default to rear so the stream is
-            // always backup-ready. Verified on A329S fw V1.3: cmd 3028
-            // par 0=front 1=interior 2=rear 5=three-channel composite.
-            setLiveSource(foundIp, CH_REAR)
-            _state.value = ViofoLink(foundIp, foundMac, true, System.currentTimeMillis())
-            Log.i(TAG, "Viofo at $foundIp ($foundMac), pinned off-VPN via $foundIface")
+        }
+        // Companion lease watchdog: when the phone stops refreshing its
+        // channel request, revert the single live source to REAR.
+        scope.launch {
+            while (isActive) {
+                delay(1_000)
+                val until = companionLeaseUntil
+                if (until != 0L && System.currentTimeMillis() > until) {
+                    companionLeaseUntil = 0L
+                    if (companionLeaseCh != CH_REAR && _state.value.ip != null) {
+                        Log.i(TAG, "companion cam lease expired -> revert REAR")
+                        selectChannel(CH_REAR)
+                    }
+                    companionLeaseCh = CH_REAR
+                }
+            }
         }
     }
 
@@ -104,6 +122,29 @@ class ViofoLocator(private val registry: CameraRegistry) {
     fun selectPaneChannel(ch: Int) {
         paneChannel.value = ch
         selectChannel(ch)
+    }
+
+    // ── companion camera lease ──────────────────────────────────
+    // The phone companion commandeers the single live source to a chosen
+    // channel while it's watching, refreshing the lease every couple seconds.
+    // When it stops (backgrounded/closed) the lease expires and the watchdog
+    // in start() reverts to REAR. Volatile: written from API request threads,
+    // read by the watchdog coroutine. NOTE this shares the one physical
+    // stream with the local CAM pane — an inherent single-source contention.
+    @Volatile private var companionLeaseUntil = 0L
+    @Volatile private var companionLeaseCh = CH_REAR
+
+    /**
+     * Companion channel request + keepalive. Repeat calls at the same channel
+     * just extend the lease (no redundant camera HTTP); a changed channel is
+     * pushed to the camera at once. Reverts to REAR [COMPANION_LEASE_MS] after
+     * the last call — see the watchdog in [start].
+     */
+    fun requestCompanionChannel(ch: Int) {
+        val changed = ch != companionLeaseCh || companionLeaseUntil == 0L
+        companionLeaseCh = ch
+        companionLeaseUntil = System.currentTimeMillis() + COMPANION_LEASE_MS
+        if (changed) selectChannel(ch)
     }
 
     private fun setLiveSource(ip: String, ch: Int): Boolean = runCatching {
@@ -188,5 +229,8 @@ class ViofoLocator(private val registry: CameraRegistry) {
         const val CH_INTERIOR = 1
         const val CH_REAR = 2
         const val CH_ALL = 5
+        // Revert-to-rear timeout after the companion's last keepalive. The
+        // companion refreshes well inside this while it's actually viewing.
+        private const val COMPANION_LEASE_MS = 5_000L
     }
 }

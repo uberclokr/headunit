@@ -259,8 +259,11 @@ private fun Dock(panes: PaneManager) {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // DRONE (CAM_DRONE) intentionally omitted from the dock — that
+        // platform is still WIP; the widget stays available in the pane
+        // picker but off the quick bar. Restore here when it's ready.
         listOf(Widget.MAP, Widget.MEDIA, Widget.GAUGES, Widget.INCLINE, Widget.CAM_REAR,
-               Widget.CAM_THERMAL, Widget.CAM_DRONE, Widget.SDR, Widget.NET).forEach { w ->
+               Widget.CAM_THERMAL, Widget.SDR, Widget.NET).forEach { w ->
             DockChip(w.label, active = panes.left == w || panes.right == w) {
                 if (panes.right != null) panes.right = w else panes.left = w
             }

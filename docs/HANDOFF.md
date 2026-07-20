@@ -56,6 +56,13 @@ substitute.
   unmapped** — see OPEN ITEMS. Capture gotcha that still applies: ELM
   monitor output obeys the headers setting — capture with `ATH1` or frames
   print with no ID.
+- **LoRaWAN**: roof **MikroTik wAP LR8G** gateway forwards raw packets via the
+  **Semtech UDP legacy packet forwarder** (RouterOS `IoT>Lora` → Network
+  Server = the head unit's LAN IP, port **1700** up+down). The head unit IS
+  the network server (`lora/` package, in-app LNS — no cloud). Point the
+  gateway at the head unit's `192.168.1.x` STA address. **SenseCAP T1000-A**
+  trackers: position packets `0x06`/`0x09`, big-endian, lon@9..12 lat@13..16
+  as int32÷1e6, battery last byte. Bind cards in the LoRa pane (OTAA or ABP).
 - **Viofo A329S dashcam**: joins the head unit's own 5 GHz SoftAP
   **`helmnet`** (no hyphen) / pass `helmrecon`, lands at
   **192.168.133.208**. A `/32` VPN-bypass route is pinned so the head unit
@@ -179,7 +186,22 @@ style: terse subject + feature-grouped body + Claude trailers.
      CAM pane / reverse cam) — but overriding the CAM widget during an active
      call is acceptable (owner: no reverse cam needed mid-call); dashcam
      encode + Wi-Fi + decode latency is "webcam-fine," not low-latency.
-4. **Thermal (UVC) camera** — parked; the `libausbc` JitPack dependency is
+4. **LoRaWAN tracking — RF shakedown** (built 2026-07-20, needs live gear).
+   In-app LNS (`lora/`) is verified in software: AES-CMAC/MIC/decrypt and the
+   SenseCAP decode are unit-tested, and on-device the Semtech UDP server binds
+   :1700 when enabled. Untested end-to-end because it needs the gateway + T1000
+   cards:
+   - Point the wAP LR8G's RouterOS Network Server at the head unit's LAN IP
+     (`IoT>Lora`, Semtech UDP legacy, :1700). Enable the LNS in the LoRa pane.
+   - **ABP is the low-risk path**: provision a card ABP (SenseCAP app → DevAddr
+     + NwkSKey + AppSKey), enter the same in the bind form → uplinks decode
+     with no downlink. Verify a node appears in the list with a fix + on nav.
+   - **OTAA join is the unvalidated bit**: the JoinAccept *crypto* is tested,
+     but the downlink RX-window **timing** (`SemtechForwarder.sendDownlink`,
+     currently RX2 tmst+6 s per region) is not — a T1000 that won't join is
+     almost certainly this. Watch `logcat -s Helm | grep -i lora`; tune the
+     window/region if joins fail, or bind that card ABP as a fallback.
+5. **Thermal (UVC) camera** — parked; the `libausbc` JitPack dependency is
    broken and needs re-sourcing before `ThermalView` can build for real.
-5. Config still partly inline (some constants) vs. the settings panel —
+6. Config still partly inline (some constants) vs. the settings panel —
    ongoing migration, not urgent.

@@ -4,3 +4,4 @@ build/
 .cxx/
 *.iml
 local.properties.bak
+secret.properties

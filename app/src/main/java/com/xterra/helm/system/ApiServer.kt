@@ -2,6 +2,7 @@ package com.xterra.helm.system
 
 import android.util.Log
 import com.google.gson.Gson
+import com.xterra.helm.BuildConfig
 import com.xterra.helm.HelmApp
 import java.io.File
 import java.net.ServerSocket
@@ -32,6 +33,8 @@ object ApiServer {
     fun start() {
         if (started) return
         started = true
+        if (BuildConfig.API_TOKEN.isEmpty())
+            Log.w(TAG, "API_TOKEN unset — /api/* is UNAUTHENTICATED (set secret.properties)")
         Thread({
             val server = ServerSocket(PORT)
             Log.i(TAG, "API server on :$PORT")
@@ -47,9 +50,24 @@ object ApiServer {
         sock.soTimeout = 10_000
         val br = sock.getInputStream().bufferedReader()
         val reqLine = br.readLine() ?: return
-        while (true) { val l = br.readLine() ?: break; if (l.isEmpty()) break }
+        var token: String? = null
+        while (true) {
+            val l = br.readLine() ?: break; if (l.isEmpty()) break
+            if (l.startsWith("X-Helm-Token:", ignoreCase = true))
+                token = l.substringAfter(':').trim()
+        }
         val path = reqLine.split(" ").getOrNull(1) ?: "/"
         val out = sock.getOutputStream()
+
+        // Auth gates /api/* only — the landing page and /companion.apk stay
+        // open so a fresh phone (no token baked yet) can still fetch the app.
+        // Enforced only when a token is configured (see start() warning).
+        if (path.startsWith("/api/") && BuildConfig.API_TOKEN.isNotEmpty()
+            && token != BuildConfig.API_TOKEN) {
+            val body = """{"error":"unauthorized"}""".toByteArray()
+            out.write(head(401, "application/json", body.size)); out.write(body); out.flush()
+            return
+        }
 
         when {
             path.startsWith("/api/status") -> {

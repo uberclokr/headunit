@@ -24,6 +24,16 @@ android {
         if (lp.exists()) props.load(lp.inputStream())
         manifestPlaceholders["MAPS_API_KEY"] = props.getProperty("MAPS_API_KEY", "")
 
+        // Shared API auth token from the gitignored secret.properties. Empty
+        // when the file is absent → ApiServer leaves /api/* open (dev builds
+        // don't lock themselves out), and logs a warning. Companion must hold
+        // the SAME value.
+        val secret = Properties()
+        val sp = rootProject.file("secret.properties")
+        if (sp.exists()) secret.load(sp.inputStream())
+        buildConfigField("String", "API_TOKEN",
+            "\"${secret.getProperty("HELM_API_TOKEN", "")}\"")
+
         // Edge2 is arm64-only; also strips LibVLC's other ABIs (~4× APK cut).
         ndk { abiFilters += "arm64-v8a" }
     }
@@ -43,7 +53,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
 }
 

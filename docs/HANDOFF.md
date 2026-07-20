@@ -15,7 +15,15 @@ substitute.
 2. **Toolchain**: Android SDK 34, **NDK `26.1.10909125`** (the native SDR
    build pins it), CMake 3.22+. The Spotify App Remote AAR is committed at
    `app/libs/` — no re-download needed.
-3. **Native deps are vendored** under `app/src/main/cpp/third_party/`
+3. **API auth token** (both repos). The head unit's HTTP API gates `/api/*`
+   on an `X-Helm-Token` header. The token lives in a **gitignored**
+   `secret.properties` at each repo root (`HELM_API_TOKEN=…`), compiled into
+   `BuildConfig.API_TOKEN`. On a fresh clone, create `secret.properties` in
+   **both** `headunit` and `helm-companion` with the **same** value, or the
+   companion gets 401s. Absent file → head unit logs a warning and leaves
+   `/api/*` open (the landing page + `/companion.apk` are always open so a
+   fresh phone can still fetch the app). Regenerate: `openssl rand -hex 24`.
+4. **Native deps are vendored** under `app/src/main/cpp/third_party/`
    (libusb + rtl-sdr, with an Android fd-wrap patch in `librtlsdr.c`). They
    compile as part of the Gradle build; don't fetch upstream.
 4. **Build**: `./gradlew :app:assembleDebug` (arm64-only). First build on a

@@ -105,7 +105,48 @@ style: terse subject + feature-grouped body + Claude trailers.
    - Once mapped, wire it into `Elm327Manager` the way the door bit is
      done, re-enable nothing else — `ReverseOverlayService` already
      collects `VehicleState.reverse`.
-2. **Thermal (UVC) camera** — parked; the `libausbc` JitPack dependency is
+2. **Engine-hum noise suppression on the mic** (backburner #2, design
+   settled 2026-07-20). Scope decided: **Path B — clean the captured mic
+   signal digitally, NOT acoustic cabin ANC** (ANC through the speakers is
+   research-grade here: Android audio latency, single-mic quiet zone, and
+   speaker LF rolloff all fight it — rejected).
+
+   The unlock is that we have ground-truth RPM at 8 Hz, so engine hum is a
+   *known* comb of tones, not a blind estimate: VQ40DE V6 boom is the 3rd
+   engine order (3 × RPM/60 ≈ 35 Hz idle → ~100 Hz cruise) plus 6th/9th.
+
+   Shared DSP core (hardware-independent, build + unit-test first, same as
+   `Dsp.kt`), in a new `audio/` package:
+   - `EngineHumSuppressor` (pure): a PLL locked to the 3rd order, *seeded and
+     bounded by* `CanRepository.state.rpm` but tracking the mic's own hum
+     between the 8 Hz updates; a narrow-Q adaptive notch comb on orders
+     3/6/9; stereo-coherence suppression of the common-mode LF field.
+   - `HarmonicProfileStore`: the "learn over time" piece — EMA of per-order
+     magnitude bucketed by ~100-RPM bins, persisted in DataStore, driving
+     spectral subtraction against the learned template.
+   - `MicSource`: `AudioRecord` wrapper, IO dispatcher, infinite reconnect.
+   Only tonal hum is targetable this way; broadband road/exhaust roar is
+   NOT RPM-locked and is out of scope.
+
+   Sinks, in build order:
+   - **Comms / radio TX** first — cleanest (half-duplex PTT, no echo).
+   - **Offline ASR** second — MUST be on-device (Vosk / whisper.cpp on the
+     RK3588); Android `SpeechRecognizer` defaults to Google *cloud* and
+     violates the no-third-party-network rule. Overlaps ROADMAP #16.
+   - **Hands-free calls** LAST / maybe descoped — hard: Android's BT HFP
+     stack owns the mic path, so interposing our DSP needs below-framework
+     (HAL/modem) work on our own image, unlike the ordinary `AudioRecord`
+     consumers above.
+
+   Two design forks to resolve at build time: (a) capture source mode —
+   `UNPROCESSED`/`VOICE_RECOGNITION` (no OS AGC/NS fighting our notches;
+   right for ASR+comms) vs `VOICE_COMMUNICATION` (platform AEC; wanted for
+   calls) — one source can't be optimal for both. (b) Any full-duplex sink
+   (a call, or comms while cabin speakers play) also needs AEC with playback
+   as reference — separate problem, same pipeline. The `AudioRecord` source
+   mode must be confirmed on the actual Edge2 image before wiring capture;
+   the DSP core needs no hardware until final tuning.
+3. **Thermal (UVC) camera** — parked; the `libausbc` JitPack dependency is
    broken and needs re-sourcing before `ThermalView` can build for real.
-3. Config still partly inline (some constants) vs. the settings panel —
+4. Config still partly inline (some constants) vs. the settings panel —
    ongoing migration, not urgent.

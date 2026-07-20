@@ -102,7 +102,7 @@ object StarlinkClient {
         }
     }.getOrNull()
 
-    private fun parseHistory(msg: ByteArray): DishHistory? {
+    internal fun parseHistory(msg: ByteArray): DishHistory? {
         val root = PbReader(msg)
         while (root.hasMore()) {
             val (f, w) = root.tag() ?: break
@@ -170,7 +170,10 @@ object StarlinkClient {
                 2 -> {
                     val s = r.sub() ?: run { sb.append("$f:len? "); return sb.toString().trim() }
                     val len = s.remaining()
-                    if (depth < 1 && len in 1..600)
+                    // Recurse one level even into big sub-messages (e.g. 2006
+                    // get_history, ~18 KB) to reveal inner field numbers; the
+                    // packed float arrays inside just report their length.
+                    if (depth < 1 && len in 1..40000)
                         sb.append("$f:{${walk(s.rangeCopy(), depth + 1)}} ")
                     else sb.append("$f:len$len ")     // big len ≈ packed float array
                 }
@@ -247,7 +250,12 @@ object StarlinkClient {
 
         /** A length-delimited field of packed little-endian float32s. */
         fun packedFloats(): FloatArray {
-            val stop = (p + varint().toInt()).coerceAtMost(end)
+            // Read the length FIRST — it advances p past the length bytes; only
+            // then is `p` the start of the data. Folding both into one
+            // expression (`p + varint()`) captured the pre-advance p and read
+            // one float short + misaligned the cursor.
+            val len = varint().toInt()
+            val stop = (p + len).coerceAtMost(end)
             val out = ArrayList<Float>((stop - p) / 4)
             while (p + 4 <= stop) out.add(float())
             p = stop

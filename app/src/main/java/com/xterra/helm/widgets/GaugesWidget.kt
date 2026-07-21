@@ -82,13 +82,6 @@ fun GaugesWidget() {
             Readout("FUEL", s.fuelLevelPct?.let { "${it.toInt()}%" } ?: "—",
                 alert = (s.fuelLevelPct ?: 100f) < 12f)
             Readout("THR", s.throttlePct?.let { "${it.toInt()}%" } ?: "—")
-            // Door state off BCM 0x60D; red only when ajar while moving.
-            Readout("DOOR",
-                when { s.bcmByte0 == null -> "—"; s.doorOpen -> "OPEN"; else -> "SHUT" },
-                alert = s.doorOpen && s.speedKmh > 5)
-            // Raw 0x60D byte0 — live instrumentation for mapping the other
-            // door/brake bits from the driver seat; drop once the map is done.
-            s.bcmByte0?.let { Readout("60D", "%02X".format(it)) }
         }
 
         Spacer(Modifier.height(12.dp))

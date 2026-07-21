@@ -166,9 +166,6 @@ private fun StatusStrip() {
         if (can.connected) can.batteryV?.let { StatTiny("STR", "%.1fV".format(it)) }
         can.coolantC?.let { StatTiny("ECT", "$it°") }
         Spacer(Modifier.weight(1f))
-        // Amber, not red: door ajar is a caution; red stays for real alerts.
-        if (can.doorOpen) Text("DOOR", color = HelmColors.Amber,
-            style = MaterialTheme.typography.titleMedium)
         if (can.reverse) Text("REVERSE", color = HelmColors.Alert,
             style = MaterialTheme.typography.titleMedium)
         StatTiny("SPD", "${(can.speedKmh * 0.6214).toInt()} mph")

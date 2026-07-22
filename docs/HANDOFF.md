@@ -111,7 +111,16 @@ style: terse subject + feature-grouped body + Claude trailers.
    load-related 16-bit value that shifts slightly in-gear (0x233 ≈0x7D88→
    0x7EA2, same effect in D/N-under-load). Static frames (0x5C5, 0x60D,
    0x625, 0x2A5) are byte-identical in both gears. The ELM also drops frames
-   (`BUFFER FULL`) on this 500 kbit bus, so treat OBD-via-ELM as exhausted.
+   (`BUFFER FULL`) on this 500 kbit bus.
+
+   **Root cause confirmed 2026-07-21: the TCM is behind the gateway and not
+   on the OBD-II bus.** A functional `0100` enumerates only `0x7E8` (ECM) —
+   no other module answers. Physical/functional requests to the TCM (0x7E1)
+   — mode 03, sessions (1003/1092/1081), tester-present, 22F190 — all return
+   `NO DATA`. So the gear-on-`0x7E9` mode-22 read is real but needs a tool
+   that routes through the gateway (CONSULT-III); a plain ELM327 on the OBD
+   port cannot reach 0x7E1/0x7E9, and the TCM's gear broadcasts never appear
+   on the OBD-visible bus. OBD-via-ELM for gear is therefore a dead end.
    Two paths remain:
    - **Reverse-lamp GPIO opto tap (recommended)** — unambiguous (lamp on iff
      reverse), code already exists (`GpioReverseSensor` + `docs/HARDWARE.md`);

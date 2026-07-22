@@ -99,27 +99,28 @@ style: terse subject + feature-grouped body + Claude trailers.
 
 ## OPEN ITEMS
 
-1. **Reverse detection — signal unknown.** The old 0x60D bit3 source was
-   the driver-door switch (see hardware facts), so `VehicleState.reverse`
-   now has NO live source and the auto rear-cam never fires. Finding the
-   real gear signal is a live-vehicle capture task, on the owner's signal:
-
-   - Key on, engine running, parked, doors SHUT (so 0x60D noise doesn't
-     pollute the diff). For each of P, R, N, D — hold the gear, run one
-     full-bus monitor burst, label it:
-     `adb -s 10.255.1.6:5555 shell am broadcast -a com.xterra.helm.ELM_CMD
-     --es cmd "ATH1;MON:1500"`
-     then save `adb -s 10.255.1.6:5555 logcat -s Helm -d | tail -60`.
-   - Diff frames across gears: the reverse indicator is whatever ID/byte
-     flips R-only (brake is held throughout, so it cancels out — that was
-     the confound last time).
-   - If nothing R-only shows on the OBD-visible bus, the gear signal may
-     live on the body bus segment the ELM can't see → fall back to the
-     GPIO reverse-lamp opto tap (`GpioReverseSensor`, hardware in
-     `docs/HARDWARE.md`), which is wiring work but unambiguous.
-   - Once mapped, wire it into `Elm327Manager` the way the door bit is
-     done, re-enable nothing else — `ReverseOverlayService` already
-     collects `VehicleState.reverse`.
+1. **Reverse detection — NOT on the OBD bus (P/R sweep done 2026-07-21).**
+   `VehicleState.reverse` still has no live source. A full live capture
+   session (engine idling, brake held, doors shut, P↔R) swept **all eight
+   11-bit ID ranges 0x000–0x7FF** via the ELM `ATMA` monitor with
+   `ATCM/ATCF` range filters (`am broadcast -a com.xterra.helm.ELM_CMD --es
+   cmd 'ATH1;ATCM700;ATCF<base>;MON:2500'`, split ELM output on `\r`).
+   **No clean gear-position bit exists on the OBD-visible bus** — every
+   Park↔Reverse difference was a rolling counter (0x2DE byte2, 0x284/285,
+   0x29E tail, 0x23D), a drifting analog sensor (0x2A0 wanders C8–CA), or a
+   load-related 16-bit value that shifts slightly in-gear (0x233 ≈0x7D88→
+   0x7EA2, same effect in D/N-under-load). Static frames (0x5C5, 0x60D,
+   0x625, 0x2A5) are byte-identical in both gears. The ELM also drops frames
+   (`BUFFER FULL`) on this 500 kbit bus, so treat OBD-via-ELM as exhausted.
+   Two paths remain:
+   - **Reverse-lamp GPIO opto tap (recommended)** — unambiguous (lamp on iff
+     reverse), code already exists (`GpioReverseSensor` + `docs/HARDWARE.md`);
+     wire the PC817 opto to a hat GPIO and re-enable the watcher.
+   - **Raw SocketCAN sniffer** (roadmap #10) — line-rate, no buffer drops,
+     can watch a byte flip at the instant of the shift; needs the JNI +
+     kernel CAN built first (currently a stub).
+   Once a source exists, feed `VehicleState.reverse`; `ReverseOverlayService`
+   already collects it.
 2. **Engine-hum noise suppression on the mic** (backburner #2, design
    settled 2026-07-20). Scope decided: **Path B — clean the captured mic
    signal digitally, NOT acoustic cabin ANC** (ANC through the speakers is

@@ -146,27 +146,41 @@ fun InclineMini(modifier: Modifier = Modifier) {
         }
         Spacer(Modifier.height(4.dp))
         if (!t.available) { Spacer(Modifier.weight(1f)); return }
-        Row(
-            Modifier.weight(1f).fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            MiniGaugeCell(t.rollDeg, rearView = true, "ROLL", t.latG, Modifier.weight(1f))
-            MiniGaugeCell(t.pitchDeg, rearView = false, "PITCH", t.lonG, Modifier.weight(1f))
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            // Only room for the top-down bubble on a wide (fullscreen) pane;
+            // a docked half-pane just shows the two gauges.
+            val showBubble = maxWidth > 560.dp
+            Row(
+                Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                MiniGaugeCell(t.rollDeg, rearView = true, "ROLL", t.latG,
+                    Modifier.weight(1f).fillMaxHeight())
+                MiniGaugeCell(t.pitchDeg, rearView = false, "PITCH", t.lonG,
+                    Modifier.weight(1f).fillMaxHeight())
+                if (showBubble) Column(
+                    Modifier.fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    TiltBubble(t.rollDeg, t.pitchDeg, Modifier.weight(1f).aspectRatio(1f))
+                    Text("BUBBLE", style = MaterialTheme.typography.labelSmall,
+                        color = HelmColors.TextDim)
+                }
+            }
         }
     }
 }
 
+/** Gauge with its numeral + label stacked beneath (no overlap with the arc). */
 @Composable
 private fun MiniGaugeCell(deg: Float, rearView: Boolean, label: String, g: Float, modifier: Modifier) {
-    Row(modifier, verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        TiltGauge(deg, rearView, g, Modifier.fillMaxHeight().aspectRatio(1.15f))
-        Column(horizontalAlignment = Alignment.Start) {
-            Text(if (abs(deg) < 0.05f) "0.0°" else "%+.1f°".format(deg),
-                style = MaterialTheme.typography.titleMedium, color = severity(deg))
-            Text(label, style = MaterialTheme.typography.labelSmall, color = HelmColors.TextDim)
-        }
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center) {
+        TiltGauge(deg, rearView, g, Modifier.weight(1f).fillMaxWidth())
+        Text(if (abs(deg) < 0.05f) "0.0°" else "%+.1f°".format(deg),
+            style = MaterialTheme.typography.titleMedium, color = severity(deg))
+        Text(label, style = MaterialTheme.typography.labelSmall, color = HelmColors.TextDim)
     }
 }
 

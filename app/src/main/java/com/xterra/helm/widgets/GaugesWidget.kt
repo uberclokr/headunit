@@ -83,7 +83,9 @@ fun GaugesWidget() {
         }
 
         // Trend slot: the selected metric's 60 s line, or the tilt graphic.
-        Box(Modifier.fillMaxWidth().height(150.dp)) {
+        // Weighted (vs the RPM/speed row's weight 1) so it gets the larger
+        // share of the flexible height — the tilt gauges need the room.
+        Box(Modifier.fillMaxWidth().weight(1.35f)) {
             if (sel == GMetric.TILT) {
                 InclineMini(Modifier.fillMaxSize())
             } else {

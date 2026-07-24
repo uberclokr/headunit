@@ -63,6 +63,21 @@ class VehicleService : LifecycleService() {
         }
     }
 
+    // Offline routing self-test (validates the embedded engine on-device):
+    //   adb shell am broadcast -a com.xterra.helm.NAV_TEST
+    //   ...--ef flat 44.058 --ef flon -121.315 --ef tlat 44.272 --ef tlon -121.174
+    // Defaults route Bend -> Redmond, OR. Result in `logcat -s Helm`.
+    private val navTest = object : BroadcastReceiver() {
+        override fun onReceive(c: Context?, i: Intent?) {
+            HelmApp.instance.nav.debugRoute(
+                i?.getFloatExtra("flat", 44.0582f)?.toDouble() ?: 44.0582,
+                i?.getFloatExtra("flon", -121.3153f)?.toDouble() ?: -121.3153,
+                i?.getFloatExtra("tlat", 44.2726f)?.toDouble() ?: 44.2726,
+                i?.getFloatExtra("tlon", -121.1739f)?.toDouble() ?: -121.1739,
+            )
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         startForeground(NOTIF_ID, notification())
@@ -71,6 +86,7 @@ class VehicleService : LifecycleService() {
         registerReceiver(renProbe, IntentFilter("com.xterra.helm.REN_DUMP"), RECEIVER_EXPORTED)
         registerReceiver(renProbe, IntentFilter("com.xterra.helm.REN_REG"), RECEIVER_EXPORTED)
         registerReceiver(slDump, IntentFilter("com.xterra.helm.SL_DUMP"), RECEIVER_EXPORTED)
+        registerReceiver(navTest, IntentFilter("com.xterra.helm.NAV_TEST"), RECEIVER_EXPORTED)
         HelmApp.instance.can.start()
         HelmApp.instance.media.start()
         HelmApp.instance.homeLink.start()

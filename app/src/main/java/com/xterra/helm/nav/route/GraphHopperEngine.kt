@@ -3,6 +3,7 @@ package com.xterra.helm.nav.route
 import android.util.Log
 import com.graphhopper.GHRequest
 import com.graphhopper.GraphHopper
+import com.graphhopper.GraphHopperConfig
 import com.graphhopper.config.CHProfile
 import com.graphhopper.config.Profile
 import java.io.File
@@ -26,13 +27,24 @@ class GraphHopperEngine : RouteEngine {
             Log.i(TAG, "no GraphHopper graph in $dataDir")
             return false
         }
+        // Memory-map the graph instead of loading it into the app's Java heap.
+        // A regional graph is hundreds of MB; RAM_STORE (the default) OOMs the
+        // process on load. MMAP reads the same on-disk files as demand-paged
+        // mmap, so heap stays flat regardless of graph size. Same file format —
+        // no rebuild needed. (GraphHopper DAType values: RAM/RAM_STORE/MMAP/MMAP_RO.)
+        val cfg = GraphHopperConfig()
+        cfg.putObject("graph.location", dataDir.absolutePath)
+        cfg.putObject("graph.dataaccess.default_type", "MMAP")
+        // Validated by init() even on pure load (only consumed during import);
+        // must be present or importOrLoad() throws. Matches the build config.
+        cfg.putObject("import.osm.ignored_highways", "footway,cycleway,path,pedestrian,steps")
+        cfg.setProfiles(listOf(Profile(PROFILE).setVehicle("car").setWeighting("fastest")))
+        cfg.setCHProfiles(listOf(CHProfile(PROFILE)))
         val gh = GraphHopper()
-        gh.setGraphHopperLocation(dataDir.absolutePath)
-        gh.setProfiles(Profile(PROFILE).setVehicle("car").setWeighting("fastest"))
-        gh.chPreparationHandler.setCHProfiles(CHProfile(PROFILE))
+        gh.init(cfg)
         gh.importOrLoad()               // no OSM file set → loads the existing graph
         hopper = gh
-        Log.i(TAG, "GraphHopper graph loaded from $dataDir")
+        Log.i(TAG, "GraphHopper graph loaded (mmap) from $dataDir")
         true
     }.getOrElse { Log.w(TAG, "GraphHopper load failed: ${it.message}"); false }
 

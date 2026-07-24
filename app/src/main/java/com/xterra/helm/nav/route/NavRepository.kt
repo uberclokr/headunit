@@ -91,6 +91,21 @@ class NavRepository(private val context: Context) {
         _state.value = _state.value.copy(route = null, guidance = null, destinationName = null, error = null)
     }
 
+    /**
+     * Debug: route between two explicit points (bypasses GPS) and log the
+     * result. Validates the offline engine on-device. NAV_TEST broadcast.
+     */
+    fun debugRoute(fromLat: Double, fromLon: Double, toLat: Double, toLon: Double) = scope.launch {
+        if (!engine.ready) { Log.w(TAG, "NAV_TEST: engine not ready (graph installed?)"); return@launch }
+        val t0 = System.currentTimeMillis()
+        val r = engine.route(fromLat, fromLon, toLat, toLon)
+        val dt = System.currentTimeMillis() - t0
+        if (r == null) { Log.w(TAG, "NAV_TEST: no route (${dt}ms)"); return@launch }
+        Log.i(TAG, "NAV_TEST ok: %.1f km, %d min, %d steps, %d pts, %d ms".format(
+            r.distanceM / 1000, r.timeMs / 60_000, r.steps.size, r.polyline.size, dt))
+        r.steps.take(8).forEach { Log.i(TAG, "  ${it.maneuver} · ${it.street} · ${it.distanceM.toInt()}m") }
+    }
+
     companion object {
         private const val TAG = "Helm"
         private const val REROUTE_MIN_MS = 8_000L   // don't reroute more than this often

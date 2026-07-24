@@ -230,3 +230,31 @@ window flags + KEEP_SCREEN_ON in MainActivity.
 **Acceptance.** Cold boot → reverse detection armed before the launcher is
 even visible; 72 h soak with zero service deaths (watch `dumpsys activity
 services`).
+
+---
+
+## 11. Offline nav map + turn-by-turn
+
+**Goal.** A self-contained nav surface for a mobile, often off-grid vehicle:
+topo/imagery map, waypoints, and full turn-by-turn — all without internet.
+
+**Impl.** MapLibre Native map (`nav/NavMap.kt`): USGS topo/imagery over 3D
+terrain, GPS puck from the USB receiver, follow-behind chase cam, waypoints
+(GeoJSON, backed up to the NAS). Routing is embedded GraphHopper 7.0
+(`nav/route/`): a pre-built Pacific-NW graph (OR+WA+ID, ~453 MB) loaded
+memory-mapped so heap stays flat; CH prepared at import. Pure guidance math
+(`Navigator.kt`, unit-tested) snaps the fix to the route each GPS update for
+distance-to-turn, ETA, off-route and auto-reroute. UI (`NavGuidanceUi.kt`):
+cyan route line, top-center turn banner (glyph + distance + street + trip
+strip), tap-a-waypoint-to-navigate. Offline voice via on-device TTS
+(`NavVoice.kt`). Both caches — map tiles and the routing graph — are managed
+in-app from the **⛃ CACHE** dialog. Full build/provision runbook and the two
+Android/ART gotchas (mmap vs OOM, the `SourceVersion` shim) in
+[`NAV_OFFLINE.md`](NAV_OFFLINE.md).
+
+**Status.** Engine + guidance verified on the Edge2 (live fix → Portland,
+180.6 km / 29 steps). UI wired to `NavRepository` StateFlow.
+
+**Open.** Traveled-vs-remaining route styling (split the line at the snap
+point); lane/exit hints; search-to-destination (offline geocode) beyond
+waypoint-tap; settings-screen home/work presets.

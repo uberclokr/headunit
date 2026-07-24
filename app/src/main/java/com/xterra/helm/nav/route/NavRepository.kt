@@ -40,6 +40,23 @@ class NavRepository(private val context: Context) {
     /** The offline routing graph folder on device. */
     fun graphDir(): File = File(context.filesDir, "graph")
 
+    /** Total on-disk size of the routing graph, bytes (0 if none installed). */
+    fun graphSizeBytes(): Long =
+        graphDir().walkTopDown().filter { it.isFile }.sumOf { it.length() }
+
+    /**
+     * Delete the offline routing graph and tear down the engine. Routing is
+     * unavailable until a new graph is provisioned (re-pushed to [graphDir]).
+     * Runs off the main thread — the folder is hundreds of MB.
+     */
+    fun deleteGraph(onDone: () -> Unit = {}) = scope.launch {
+        route = null
+        runCatching { engine.close() }
+        graphDir().deleteRecursively()
+        _state.value = NavState(engineReady = false)
+        onDone()
+    }
+
     fun start() {
         scope.launch {
             val ok = engine.load(graphDir())

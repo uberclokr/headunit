@@ -28,6 +28,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.xterra.helm.HelmApp
 import com.xterra.helm.ui.theme.HelmColors
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
@@ -47,6 +49,8 @@ import org.maplibre.android.offline.OfflineRegionStatus
 import org.maplibre.android.offline.OfflineTilePyramidRegionDefinition
 import java.io.File
 import org.maplibre.android.style.layers.CircleLayer
+import org.maplibre.android.style.layers.LineLayer
+import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.layers.PropertyFactory
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.FeatureCollection
@@ -79,6 +83,25 @@ fun NavMap() {
     // Offline region-download progress text + region manager visibility.
     var cacheMsg by remember { mutableStateOf<String?>(null) }
     var showRegions by remember { mutableStateOf(false) }
+    // Turn-by-turn: live route/guidance + offline voice prompts.
+    val nav by HelmApp.instance.nav.state.collectAsState()
+    val voice = remember { NavVoice(ctx) }
+    var voiceMuted by remember { mutableStateOf(false) }
+    DisposableEffect(Unit) { onDispose { voice.shutdown() } }
+    LaunchedEffect(voiceMuted) { voice.muted = voiceMuted }
+
+    // Push the active route geometry into the map source; reset voice per trip.
+    LaunchedEffect(nav.route) {
+        mapRef.value?.style?.getSourceAs<GeoJsonSource>(ROUTE_SRC)
+            ?.setGeoJson(routeGeoJson(nav.route))
+        if (nav.route != null) voice.reset()
+    }
+    // Speak the upcoming maneuver as it comes into range / at the turn.
+    LaunchedEffect(nav.guidance) { voice.announce(nav.guidance) }
+    // Announce a reroute the moment we drop off the line.
+    LaunchedEffect(nav.guidance?.onRoute) {
+        if (nav.guidance?.onRoute == false && nav.route != null) voice.onReroute()
+    }
 
     // Apply the camera mode whenever it toggles (or after first activation).
     // The first application sets the mode's default zoom; after that a mode
@@ -184,6 +207,14 @@ fun NavMap() {
             },
         )
 
+        // Turn-by-turn banner (top-center), shown only while navigating.
+        TurnBanner(
+            nav,
+            onEnd = { HelmApp.instance.nav.clear() },
+            voiceMuted = voiceMuted,
+            onToggleVoice = { voiceMuted = !voiceMuted },
+        )
+
         // Corner layout: wide rows hug the corners, short chips ride the
         // edges, so the center of the map stays clear.
         // Top-right: base-layer row only.
@@ -211,7 +242,7 @@ fun NavMap() {
                     downloadRegion(ctx, m, base) { cacheMsg = it }
                 }
             }
-            LayerChip("⛃ REGIONS", active = false) { showRegions = true }
+            LayerChip("⛃ CACHE", active = false) { showRegions = true }
         }
 
         if (showRegions) RegionsDialog(onDismiss = { showRegions = false })
@@ -237,6 +268,21 @@ fun NavMap() {
                         .background(HelmColors.Glass, RoundedCornerShape(6.dp))
                         .padding(horizontal = 8.dp, vertical = 6.dp),
                 )
+                // Route to this waypoint from the current fix (turn-by-turn).
+                LayerChip(if (nav.engineReady) "▶ NAVIGATE" else "▶ (no map)",
+                    active = nav.route != null) {
+                    if (nav.engineReady) {
+                        val pt = pois.features()
+                            ?.firstOrNull { it.getStringProperty("id") == id }
+                            ?.geometry() as? org.maplibre.geojson.Point
+                        pt?.let {
+                            HelmApp.instance.nav.navigateTo(
+                                it.latitude(), it.longitude(),
+                                name.ifBlank { "Waypoint" })
+                        }
+                        selected = null
+                    }
+                }
                 LayerChip("✓", active = false) {
                     editName.trim().takeIf { it.isNotEmpty() && it != name }
                         ?.let { HelmApp.instance.poi.rename(id, it) }
@@ -346,6 +392,24 @@ private fun GpsFix.toLocation(): Location = Location("helm-gps").apply {
 
 private fun applyStyle(ctx: Context, map: MapLibreMap, base: MapStyles.Base) {
     map.setStyle(Style.Builder().fromJson(MapStyles.style(base))) { style ->
+        // Active route: a cyan line over a dark casing for contrast on both topo
+        // and imagery. Added first so waypoints, LoRa dots, and the puck all
+        // render above it. Fed live from NavRepository (see the route effect).
+        style.addSource(GeoJsonSource(ROUTE_SRC, routeGeoJson(HelmApp.instance.nav.state.value.route)))
+        style.addLayer(LineLayer(ROUTE_CASING, ROUTE_SRC).withProperties(
+            PropertyFactory.lineColor("#0B0F14"),
+            PropertyFactory.lineWidth(9f),
+            PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+            PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
+            PropertyFactory.lineOpacity(0.9f),
+        ))
+        style.addLayer(LineLayer(ROUTE_LINE, ROUTE_SRC).withProperties(
+            PropertyFactory.lineColor("#7FD7E8"),
+            PropertyFactory.lineWidth(5f),
+            PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+            PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
+            PropertyFactory.lineOpacity(0.95f),
+        ))
         // Waypoint layer: amber dots with a white ring, readable over topo and
         // imagery alike. Re-added on every restyle (setStyle rebuilds layers).
         style.addSource(GeoJsonSource(POI_SRC, HelmApp.instance.poi.pois.value))
@@ -467,26 +531,44 @@ private fun hasLocationPermission(ctx: Context) =
     ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.ACCESS_FINE_LOCATION) ==
         PackageManager.PERMISSION_GRANTED
 
-/** Cached-region manager: list with sizes, per-region delete, total. */
+/**
+ * Offline-cache manager for both cache classes the user cares about:
+ * map tiles (MapLibre offline regions, per-region delete) and the navigation
+ * routing graph (size + delete). One dialog so storage is managed in one place.
+ */
 @Composable
 private fun RegionsDialog(onDismiss: () -> Unit) {
     val ctx = LocalContext.current
     var regions by remember { mutableStateOf<List<OfflineRegions.Info>?>(null) }
     var reload by remember { mutableStateOf(0) }
     LaunchedEffect(reload) { OfflineRegions.list(ctx) { regions = it } }
+
+    val nav by HelmApp.instance.nav.state.collectAsState()
+    var graphMb by remember { mutableStateOf<Double?>(null) }
+    var reloadGraph by remember { mutableStateOf(0) }
+    LaunchedEffect(reloadGraph) {
+        graphMb = withContext(Dispatchers.IO) {
+            HelmApp.instance.nav.graphSizeBytes() / 1_048_576.0
+        }
+    }
+
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
         Column(
             Modifier.clip(RoundedCornerShape(14.dp))
                 .background(HelmColors.Panel)
-                .padding(18.dp).widthIn(min = 340.dp),
+                .padding(18.dp).widthIn(min = 340.dp).widthIn(max = 460.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text("OFFLINE REGIONS", style = MaterialTheme.typography.titleMedium,
+            Text("OFFLINE CACHE", style = MaterialTheme.typography.titleMedium,
                 color = HelmColors.Amber)
+
+            // ── Map tiles ────────────────────────────────────────────────
+            Text("MAP TILES", style = MaterialTheme.typography.labelMedium,
+                color = HelmColors.Cyan)
             when {
                 regions == null -> Text("loading…",
                     style = MaterialTheme.typography.bodyMedium, color = HelmColors.TextDim)
-                regions!!.isEmpty() -> Text("nothing cached yet",
+                regions!!.isEmpty() -> Text("no regions cached — frame an area and CACHE THIS VIEW",
                     style = MaterialTheme.typography.bodyMedium, color = HelmColors.TextDim)
                 else -> {
                     regions!!.forEach { info ->
@@ -505,10 +587,36 @@ private fun RegionsDialog(onDismiss: () -> Unit) {
                             }
                         }
                     }
-                    Text("total %.0f MB".format(regions!!.sumOf { it.mb }),
+                    Text("tiles total %.0f MB".format(regions!!.sumOf { it.mb }),
                         style = MaterialTheme.typography.labelSmall, color = HelmColors.Cyan)
                 }
             }
+
+            // ── Routing graph ────────────────────────────────────────────
+            Text("NAVIGATION", style = MaterialTheme.typography.labelMedium,
+                color = HelmColors.Cyan)
+            Row(verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(Modifier.weight(1f)) {
+                    val mb = graphMb
+                    Text("Offline routing graph",
+                        style = MaterialTheme.typography.bodyMedium, color = HelmColors.Text)
+                    Text(
+                        when {
+                            mb == null -> "measuring…"
+                            mb < 1.0 -> "not installed"
+                            else -> "%.0f MB · %s".format(
+                                mb, if (nav.engineReady) "loaded" else "present, not loaded")
+                        },
+                        style = MaterialTheme.typography.labelSmall, color = HelmColors.TextDim)
+                }
+                if ((graphMb ?: 0.0) >= 1.0) {
+                    LayerChip("DELETE", active = false) {
+                        HelmApp.instance.nav.deleteGraph { reloadGraph++ }
+                    }
+                }
+            }
+
             LayerChip("CLOSE", active = false) { onDismiss() }
         }
     }

@@ -78,6 +78,20 @@ class VehicleService : LifecycleService() {
         }
     }
 
+    // Start a real turn-by-turn trip from the live GPS fix to a destination —
+    // drives the on-screen route line, banner, and voice (unlike NAV_TEST,
+    // which only logs). Defaults to Bend, OR:
+    //   adb shell am broadcast -a com.xterra.helm.NAV_GO --ef tlat 44.06 --ef tlon -121.31
+    private val navGo = object : BroadcastReceiver() {
+        override fun onReceive(c: Context?, i: Intent?) {
+            HelmApp.instance.nav.navigateTo(
+                i?.getFloatExtra("tlat", 44.0582f)?.toDouble() ?: 44.0582,
+                i?.getFloatExtra("tlon", -121.3153f)?.toDouble() ?: -121.3153,
+                i?.getStringExtra("name") ?: "Waypoint",
+            )
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         startForeground(NOTIF_ID, notification())
@@ -87,6 +101,7 @@ class VehicleService : LifecycleService() {
         registerReceiver(renProbe, IntentFilter("com.xterra.helm.REN_REG"), RECEIVER_EXPORTED)
         registerReceiver(slDump, IntentFilter("com.xterra.helm.SL_DUMP"), RECEIVER_EXPORTED)
         registerReceiver(navTest, IntentFilter("com.xterra.helm.NAV_TEST"), RECEIVER_EXPORTED)
+        registerReceiver(navGo, IntentFilter("com.xterra.helm.NAV_GO"), RECEIVER_EXPORTED)
         HelmApp.instance.can.start()
         HelmApp.instance.media.start()
         HelmApp.instance.homeLink.start()

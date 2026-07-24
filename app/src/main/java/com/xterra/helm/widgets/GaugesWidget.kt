@@ -80,6 +80,8 @@ fun GaugesWidget() {
                 Text("MPH", style = MaterialTheme.typography.labelSmall, color = HelmColors.TextDim)
                 DtcSummary(s)
             }
+            // Permanent top-down level bubble, third instrument on the row.
+            LevelBubble(Modifier.weight(0.9f).fillMaxHeight())
         }
 
         // Trend slot: the selected metric's 60 s line, or the tilt graphic.

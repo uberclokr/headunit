@@ -146,28 +146,17 @@ fun InclineMini(modifier: Modifier = Modifier) {
         }
         Spacer(Modifier.height(4.dp))
         if (!t.available) { Spacer(Modifier.weight(1f)); return }
-        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
-            // Only room for the top-down bubble on a wide (fullscreen) pane;
-            // a docked half-pane just shows the two gauges.
-            val showBubble = maxWidth > 560.dp
-            Row(
-                Modifier.fillMaxSize(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                MiniGaugeCell(t.rollDeg, rearView = true, "ROLL", t.latG,
-                    Modifier.weight(1f).fillMaxHeight())
-                MiniGaugeCell(t.pitchDeg, rearView = false, "PITCH", t.lonG,
-                    Modifier.weight(1f).fillMaxHeight())
-                if (showBubble) Column(
-                    Modifier.fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
-                ) {
-                    TiltBubble(t.rollDeg, t.pitchDeg, Modifier.weight(1f).aspectRatio(1f))
-                    Text("BUBBLE", style = MaterialTheme.typography.labelSmall,
-                        color = HelmColors.TextDim)
-                }
-            }
+        // Two big gauges split the full width — the bubble lives on the main
+        // dash row now, so these get all the room to be large and prominent.
+        Row(
+            Modifier.weight(1f).fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            MiniGaugeCell(t.rollDeg, rearView = true, "ROLL", t.latG,
+                Modifier.weight(1f).fillMaxHeight())
+            MiniGaugeCell(t.pitchDeg, rearView = false, "PITCH", t.lonG,
+                Modifier.weight(1f).fillMaxHeight())
         }
     }
 }
@@ -179,8 +168,28 @@ private fun MiniGaugeCell(deg: Float, rearView: Boolean, label: String, g: Float
         verticalArrangement = Arrangement.Center) {
         TiltGauge(deg, rearView, g, Modifier.weight(1f).fillMaxWidth())
         Text(if (abs(deg) < 0.05f) "0.0°" else "%+.1f°".format(deg),
-            style = MaterialTheme.typography.titleMedium, color = severity(deg))
+            style = MaterialTheme.typography.headlineSmall, color = severity(deg))
         Text(label, style = MaterialTheme.typography.labelSmall, color = HelmColors.TextDim)
+    }
+}
+
+/**
+ * Compact top-down level bubble for the main dashboard row (permanent,
+ * alongside RPM and MPH). Self-contained — reads the tilt state directly.
+ */
+@Composable
+fun LevelBubble(modifier: Modifier = Modifier) {
+    val t by HelmApp.instance.tilt.state.collectAsState()
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center) {
+        if (t.available) {
+            TiltBubble(t.rollDeg, t.pitchDeg, Modifier.weight(1f).fillMaxWidth())
+        } else {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text("—", style = MaterialTheme.typography.displayLarge, color = HelmColors.TextDim)
+            }
+        }
+        Text("LEVEL", style = MaterialTheme.typography.labelSmall, color = HelmColors.TextDim)
     }
 }
 

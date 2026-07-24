@@ -41,6 +41,8 @@ class HelmApp : Application() {
         private set
     lateinit var lora: com.xterra.helm.lora.LoraRepository
         private set
+    lateinit var nav: com.xterra.helm.nav.route.NavRepository
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -59,6 +61,7 @@ class HelmApp : Application() {
         net = com.xterra.helm.system.NetRepository(this, settings)
         tilt = com.xterra.helm.system.TiltRepository(this, settings)
         lora = com.xterra.helm.lora.LoraRepository(this)
+        nav = com.xterra.helm.nav.route.NavRepository(this)
         // Kick the always-on vehicle service (CAN poll + reverse watch).
         startForegroundService(Intent(this, VehicleService::class.java))
     }

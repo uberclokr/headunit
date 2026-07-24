@@ -78,6 +78,7 @@ class VehicleService : LifecycleService() {
         HelmApp.instance.gps.start()
         HelmApp.instance.net.start()
         HelmApp.instance.lora.start()
+        HelmApp.instance.nav.start()
         // Companion-app back end: status API + camera relay, served over WG.
         ApiServer.start()
         RtspRelay.start()

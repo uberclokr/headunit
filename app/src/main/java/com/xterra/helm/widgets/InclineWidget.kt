@@ -126,6 +126,50 @@ fun InclineWidget() {
     }
 }
 
+/**
+ * Compact roll + pitch truck gauges for embedding in another pane (the
+ * vehicle dashboard's trend slot). Same artwork as the full TILT pane, sized
+ * to a short wide strip; reads the tilt state directly.
+ */
+@Composable
+fun InclineMini(modifier: Modifier = Modifier) {
+    val t by HelmApp.instance.tilt.state.collectAsState()
+    Column(modifier) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("TILT · ROLL / PITCH", style = MaterialTheme.typography.labelSmall,
+                color = HelmColors.TextDim)
+            Spacer(Modifier.weight(1f))
+            if (!t.available) Text("NO ACCEL", style = MaterialTheme.typography.labelSmall,
+                color = HelmColors.TextDim)
+            else if (!t.calibrated) Text("ZERO ON TILT PANE",
+                style = MaterialTheme.typography.labelSmall, color = HelmColors.Amber)
+        }
+        Spacer(Modifier.height(4.dp))
+        if (!t.available) { Spacer(Modifier.weight(1f)); return }
+        Row(
+            Modifier.weight(1f).fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            MiniGaugeCell(t.rollDeg, rearView = true, "ROLL", t.latG, Modifier.weight(1f))
+            MiniGaugeCell(t.pitchDeg, rearView = false, "PITCH", t.lonG, Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun MiniGaugeCell(deg: Float, rearView: Boolean, label: String, g: Float, modifier: Modifier) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        TiltGauge(deg, rearView, g, Modifier.fillMaxHeight().aspectRatio(1.15f))
+        Column(horizontalAlignment = Alignment.Start) {
+            Text(if (abs(deg) < 0.05f) "0.0°" else "%+.1f°".format(deg),
+                style = MaterialTheme.typography.titleMedium, color = severity(deg))
+            Text(label, style = MaterialTheme.typography.labelSmall, color = HelmColors.TextDim)
+        }
+    }
+}
+
 /** Wide-pane cell: gauge with its numeral snugged directly beneath. */
 @Composable
 private fun GaugeCell(

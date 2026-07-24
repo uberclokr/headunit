@@ -2,6 +2,7 @@ package com.xterra.helm.widgets
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -9,13 +10,16 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
@@ -27,7 +31,10 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xterra.helm.HelmApp
+import com.xterra.helm.can.TrendSample
+import com.xterra.helm.can.VehicleState
 import com.xterra.helm.ui.theme.HelmColors
+import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.max
@@ -36,12 +43,22 @@ import kotlin.math.sin
 private const val RPM_MAX = 7000f
 private const val RPM_REDLINE = 5500f
 
-/** RPM arc + speed numeral, 60 s MPG trend, readout tiles. */
+/**
+ * The graphable OBD metrics; the trend slot plots whichever one is selected.
+ * TILT is special — its tile shows current max roll/pitch and, when tapped,
+ * renders the truck-silhouette tilt graphic instead of a line trend.
+ */
+private enum class GMetric { MPG, AVG, ECT, IAT, FUEL, THR, TILT }
+
+/** RPM arc + speed numeral, tap-selectable 60 s trend, readout tiles. */
 @Composable
 fun GaugesWidget() {
     val s by HelmApp.instance.can.state.collectAsState()
-    val mpgHistory by HelmApp.instance.can.mpgHistory.collectAsState()
+    val trend by HelmApp.instance.can.trend.collectAsState()
     val batt by HelmApp.instance.battery.state.collectAsState()
+    val tilt by HelmApp.instance.tilt.state.collectAsState()
+    // Selected trend metric — persists while the pane is shown. MPG by default.
+    var sel by remember { mutableStateOf(GMetric.MPG) }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 12.dp)) {
         Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
@@ -65,27 +82,56 @@ fun GaugesWidget() {
             }
         }
 
-        MpgTrend(
-            history = mpgHistory,
-            avg = s.avgMpg,
-            connected = s.connected,
-            modifier = Modifier.fillMaxWidth().height(150.dp),
-        )
+        // Trend slot: the selected metric's 60 s line, or the tilt graphic.
+        Box(Modifier.fillMaxWidth().height(150.dp)) {
+            if (sel == GMetric.TILT) {
+                InclineMini(Modifier.fillMaxSize())
+            } else {
+                MetricTrend(
+                    metric = sel, trend = trend, avg = s.avgMpg, connected = s.connected,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
         Spacer(Modifier.height(10.dp))
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            Readout("MPG", s.instantMpg?.let { "%.1f".format(it) } ?: "—")
-            Readout("AVG", s.avgMpg?.let { "%.1f".format(it) } ?: "—")
-            Readout("ECT", s.coolantC?.let { "$it°C" } ?: "—",
-                alert = (s.coolantC ?: 0) > 105)
-            Readout("IAT", s.intakeC?.let { "$it°C" } ?: "—")
-            Readout("FUEL", s.fuelLevelPct?.let { "${it.toInt()}%" } ?: "—",
-                alert = (s.fuelLevelPct ?: 100f) < 12f)
-            Readout("THR", s.throttlePct?.let { "${it.toInt()}%" } ?: "—")
+            StatTile(GMetric.MPG, sel, s.instantMpg?.let { "%.1f".format(it) }) { sel = GMetric.MPG }
+            StatTile(GMetric.AVG, sel, s.avgMpg?.let { "%.1f".format(it) }) { sel = GMetric.AVG }
+            StatTile(GMetric.ECT, sel, s.coolantC?.let { "$it°C" },
+                alert = (s.coolantC ?: 0) > 105) { sel = GMetric.ECT }
+            StatTile(GMetric.IAT, sel, s.intakeC?.let { "$it°C" }) { sel = GMetric.IAT }
+            StatTile(GMetric.FUEL, sel, s.fuelLevelPct?.let { "${it.toInt()}%" },
+                alert = (s.fuelLevelPct ?: 100f) < 12f) { sel = GMetric.FUEL }
+            StatTile(GMetric.THR, sel, s.throttlePct?.let { "${it.toInt()}%" }) { sel = GMetric.THR }
+            // Max current tilt (dominant axis) → tap for the tilt graphic.
+            val maxTilt = if (tilt.available) max(abs(tilt.rollDeg), abs(tilt.pitchDeg)) else null
+            StatTile(GMetric.TILT, sel, maxTilt?.let { "%.0f°".format(it) },
+                alert = (maxTilt ?: 0f) >= 25f) { sel = GMetric.TILT }
         }
 
         Spacer(Modifier.height(12.dp))
         PowerSections(batt, starterV = s.batteryV, ecuOnline = s.connected)
+    }
+}
+
+/** A tappable readout tile that selects the trend metric; highlights when active. */
+@Composable
+private fun StatTile(
+    metric: GMetric, selected: GMetric, value: String?, alert: Boolean = false, onTap: () -> Unit,
+) {
+    val isSel = metric == selected
+    Column(
+        Modifier.clip(RoundedCornerShape(8.dp))
+            .background(if (isSel) HelmColors.Cyan.copy(alpha = 0.14f) else Color.Transparent)
+            .clickable { onTap() }
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(value ?: "—", style = MaterialTheme.typography.headlineMedium,
+            color = when { alert -> HelmColors.Alert; isSel -> HelmColors.Cyan; else -> HelmColors.Text })
+        Text(metric.name, style = MaterialTheme.typography.labelSmall,
+            color = if (isSel) HelmColors.Cyan else HelmColors.TextDim)
     }
 }
 
@@ -242,12 +288,14 @@ private fun RpmDial(rpm: Int) {
 }
 
 /**
- * Rolling 60 s instant-MPG trend. Single cyan series (the title names it, so
- * no legend), quiet gridlines, dashed trip-average reference, endpoint dot.
+ * Rolling 60 s trend of the selected metric. Single cyan series (the title
+ * names it), quiet gridlines, endpoint dot; MPG additionally shows the dashed
+ * trip-average reference. Series is pulled per-metric from the trend ring.
  */
 @Composable
-private fun MpgTrend(
-    history: List<Float>,
+private fun MetricTrend(
+    metric: GMetric,
+    trend: List<TrendSample>,
     avg: Float?,
     connected: Boolean,
     modifier: Modifier = Modifier,
@@ -257,9 +305,20 @@ private fun MpgTrend(
         TextStyle(fontFamily = FontFamily.Monospace, fontSize = 9.sp,
                   color = HelmColors.TextDim)
     }
+    val history = trend.mapNotNull { sample ->
+        when (metric) {
+            GMetric.MPG -> sample.instantMpg
+            GMetric.AVG -> sample.avgMpg
+            GMetric.ECT -> sample.coolantC?.toFloat()
+            GMetric.IAT -> sample.intakeC?.toFloat()
+            GMetric.FUEL -> sample.fuelPct
+            GMetric.THR -> sample.throttlePct
+            GMetric.TILT -> null
+        }
+    }
     Column(modifier) {
         Row(Modifier.fillMaxWidth()) {
-            Text("MPG · LAST 60 S", style = MaterialTheme.typography.labelSmall,
+            Text("${metric.name} · LAST 60 S", style = MaterialTheme.typography.labelSmall,
                 color = HelmColors.TextDim)
             Spacer(Modifier.weight(1f))
             if (!connected) Text("ECU OFFLINE", style = MaterialTheme.typography.labelSmall,
@@ -270,7 +329,11 @@ private fun MpgTrend(
             val gutter = 26.dp.toPx()            // y-label gutter, left
             val plotW = size.width - gutter
             val plotH = size.height
-            val yMax = max(30f, ceil((history.maxOrNull() ?: 0f) / 10f) * 10f)
+            val yMax = when (metric) {
+                GMetric.FUEL, GMetric.THR -> 100f     // percentages: fixed full-scale
+                GMetric.MPG -> max(30f, ceil((history.maxOrNull() ?: 0f) / 10f) * 10f)
+                else -> max(10f, ceil((history.maxOrNull() ?: 0f) / 10f) * 10f)
+            }
             fun y(v: Float) = plotH * (1f - (v / yMax).coerceIn(0f, 1f))
 
             // Quiet grid: 0 / mid / max, hairline; labels in the gutter.
@@ -282,8 +345,8 @@ private fun MpgTrend(
                     (y(v) - lay.size.height / 2f).coerceIn(0f, plotH - lay.size.height)))
             }
 
-            // Dashed trip-average reference line.
-            if (avg != null && connected) {
+            // Dashed trip-average reference line (MPG only).
+            if (metric == GMetric.MPG && avg != null && connected) {
                 drawLine(HelmColors.TextDim, Offset(gutter, y(avg)),
                     Offset(size.width, y(avg)), strokeWidth = 1.5f,
                     pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 8f)))

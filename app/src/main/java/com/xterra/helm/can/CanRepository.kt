@@ -30,6 +30,14 @@ data class VehicleState(
     val source: String = "—",
 )
 
+/** One 60 s trend sample — the held graphable OBD metrics at a poll instant. */
+data class TrendSample(
+    val t: Long,
+    val instantMpg: Float?, val avgMpg: Float?,
+    val coolantC: Int?, val intakeC: Int?,
+    val fuelPct: Float?, val throttlePct: Float?,
+)
+
 /**
  * Owns the CAN/OBD link and exposes [state]. Two backends:
  *  - [Elm327Manager]: USB ELM327/OBDLink dongle. Works on any Android, no root.
@@ -53,6 +61,14 @@ class CanRepository(context: Context) {
     val mpgHistory: StateFlow<List<Float>> = _mpgHistory
     private val mpgRing = ArrayDeque<Pair<Long, Float>>()
 
+    /**
+     * Last 60 s of every graphable OBD metric (held values, ~8 Hz) so the
+     * vehicle pane can plot whichever stat the user taps — not just MPG.
+     */
+    private val _trend = MutableStateFlow<List<TrendSample>>(emptyList())
+    val trend: StateFlow<List<TrendSample>> = _trend
+    private val trendRing = ArrayDeque<TrendSample>()
+
     private val elm = Elm327Manager(
         context,
         onLink = { up ->
@@ -60,6 +76,8 @@ class CanRepository(context: Context) {
                 mpg.reset()
                 synchronized(mpgRing) { mpgRing.clear() }
                 _mpgHistory.value = emptyList()
+                synchronized(trendRing) { trendRing.clear() }
+                _trend.value = emptyList()
             }
             _state.value = _state.value.copy(
                 connected = up, source = if (up) "ELM327/USB" else "—")
@@ -117,6 +135,15 @@ class CanRepository(context: Context) {
             doorOpen = ((p.bcmByte0 ?: prev.bcmByte0 ?: 0) and DOOR_BITS) != 0,
             source = "ELM327/USB",
         )
+
+        val st = _state.value
+        synchronized(trendRing) {
+            trendRing.addLast(TrendSample(now, st.instantMpg, st.avgMpg,
+                st.coolantC, st.intakeC, st.fuelLevelPct, st.throttlePct))
+            while (trendRing.isNotEmpty() && now - trendRing.first().t > 60_000)
+                trendRing.removeFirst()
+            _trend.value = trendRing.toList()
+        }
     }
 
     companion object {

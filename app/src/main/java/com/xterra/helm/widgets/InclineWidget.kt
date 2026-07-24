@@ -180,16 +180,12 @@ private fun MiniGaugeCell(deg: Float, rearView: Boolean, label: String, g: Float
 @Composable
 fun LevelBubble(modifier: Modifier = Modifier) {
     val t by HelmApp.instance.tilt.state.collectAsState()
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center) {
-        if (t.available) {
-            TiltBubble(t.rollDeg, t.pitchDeg, Modifier.weight(1f).fillMaxWidth())
-        } else {
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text("—", style = MaterialTheme.typography.displayLarge, color = HelmColors.TextDim)
-            }
+    if (t.available) {
+        TiltBubble(t.rollDeg, t.pitchDeg, modifier)
+    } else {
+        Box(modifier, contentAlignment = Alignment.Center) {
+            Text("—", style = MaterialTheme.typography.displayLarge, color = HelmColors.TextDim)
         }
-        Text("LEVEL", style = MaterialTheme.typography.labelSmall, color = HelmColors.TextDim)
     }
 }
 

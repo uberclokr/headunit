@@ -180,12 +180,17 @@ private fun MiniGaugeCell(deg: Float, rearView: Boolean, label: String, g: Float
 @Composable
 fun LevelBubble(modifier: Modifier = Modifier) {
     val t by HelmApp.instance.tilt.state.collectAsState()
-    if (t.available) {
-        TiltBubble(t.rollDeg, t.pitchDeg, modifier)
-    } else {
-        Box(modifier, contentAlignment = Alignment.Center) {
-            Text("—", style = MaterialTheme.typography.displayLarge, color = HelmColors.TextDim)
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        if (t.available) {
+            TiltBubble(t.rollDeg, t.pitchDeg, Modifier.weight(1f).fillMaxWidth())
+        } else {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text("—", style = MaterialTheme.typography.displayLarge, color = HelmColors.TextDim)
+            }
         }
+        // Blank base: the full circle would hang below the RPM dial's 270° arc
+        // (which stops ~15% above the cell floor); this lifts it to match.
+        Spacer(Modifier.fillMaxHeight(0.15f))
     }
 }
 

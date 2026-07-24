@@ -54,7 +54,16 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true; buildConfig = true }
-    packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
+    packaging {
+        // GraphHopper's transitive jars (jakarta.*) duplicate these license
+        // metadata files; drop them so the merge doesn't conflict.
+        resources.excludes += setOf(
+            "/META-INF/{AL2.0,LGPL2.1}",
+            "/META-INF/LICENSE.md", "/META-INF/LICENSE.txt", "/META-INF/LICENSE",
+            "/META-INF/NOTICE.md", "/META-INF/NOTICE.txt", "/META-INF/NOTICE",
+            "/META-INF/DEPENDENCIES",
+        )
+    }
 }
 
 dependencies {
@@ -109,6 +118,12 @@ dependencies {
 
     // QR generation for the companion-app download link (pure-Java, offline).
     implementation("com.google.zxing:core:3.5.3")
+
+    // Embedded offline routing (turn-by-turn). Pure-JVM core, loads a pre-built
+    // regional graph from device storage — no internet, no NDK. Graph must be
+    // built with THIS version. 7.0 keeps the classic Profile API and CH prep
+    // (query-time uses precomputed shortcuts, so no Janino under ART).
+    implementation("com.graphhopper:graphhopper-core:7.0")
 
     testImplementation("junit:junit:4.13.2")
 }

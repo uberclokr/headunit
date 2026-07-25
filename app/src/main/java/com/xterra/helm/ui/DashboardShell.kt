@@ -1,5 +1,6 @@
 package com.xterra.helm.ui
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -18,7 +19,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -160,15 +166,82 @@ private fun StatusStrip() {
             if (gps.fixDim == 3) "3D" else if (gps.fixDim == 2) "2D" else "FIX",
             "${gps.sats}·${"%.1f".format(gps.hdop)}")
         home.latencyMs?.let { StatTiny("WG", "${it}ms") }
-        // Two batteries on this truck — always name which one a number
-        // belongs to. HOUSE = Renogy LiFePO4 pack, STR = starter via ECM.
-        StatTiny("HOUSE", "${batt.socPct}%·" + "%.1fV".format(batt.volts))
-        if (can.connected) can.batteryV?.let { StatTiny("STR", "%.1fV".format(it)) }
         can.coolantC?.let { StatTiny("ECT", "$it°") }
         Spacer(Modifier.weight(1f))
         if (can.reverse) Text("REVERSE", color = HelmColors.Alert,
             style = MaterialTheme.typography.titleMedium)
-        StatTiny("SPD", "${(can.speedKmh * 0.6214).toInt()} mph")
+        // Both batteries, right-aligned, each with a level-filled icon.
+        // HOUSE = Renogy LiFePO4 pack (true coulomb SOC). ECM = starter/charging
+        // bus voltage read from the engine module (no SOC, so level is inferred
+        // from voltage; >13 V = alternator charging).
+        BatteryStat("HOUSE", batt.socPct / 100f,
+            if (batt.connected) "${batt.socPct}%·${"%.1fV".format(batt.volts)}" else "—",
+            batt.charging, batt.connected)
+        if (can.connected) can.batteryV?.let { v ->
+            val charging = v > 13.0f
+            BatteryStat("ECM",
+                if (charging) 1f else ((v - 11.8f) / 0.9f).coerceIn(0f, 1f),
+                "%.1fV".format(v), charging, connected = true)
+        }
+    }
+}
+
+/** A battery readout: label + a level-filled icon + value ("—"/dim when down). */
+@Composable
+private fun BatteryStat(
+    label: String, level: Float, value: String, charging: Boolean, connected: Boolean,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = HelmColors.TextDim)
+        BatteryIcon(level, charging, connected)
+        Text(value, style = MaterialTheme.typography.bodyMedium,
+            color = if (connected) HelmColors.Cyan else HelmColors.TextDim)
+    }
+}
+
+/**
+ * Dynamic battery glyph: an outlined cell whose fill tracks [level] (0..1) and
+ * whose colour tracks state — cyan while charging, else green/amber/red by
+ * charge. A bolt overlays the fill when charging. When the link is down the
+ * cell is drawn empty and dim (no misleading red "flat" fill).
+ */
+@Composable
+private fun BatteryIcon(level: Float, charging: Boolean, connected: Boolean) {
+    val fill = when {
+        !connected -> Color.Transparent
+        charging -> HelmColors.Cyan
+        level > 0.5f -> HelmColors.Ok
+        level > 0.2f -> HelmColors.Amber
+        else -> HelmColors.Alert
+    }
+    val outline = HelmColors.TextDim
+    Canvas(Modifier.size(width = 24.dp, height = 12.dp)) {
+        val termW = size.width * 0.07f
+        val bodyW = size.width - termW
+        val r = size.height * 0.2f
+        drawRoundRect(outline, Offset(0f, 0f), Size(bodyW, size.height),
+            CornerRadius(r, r), style = Stroke(width = size.height * 0.12f))
+        drawRoundRect(outline, Offset(bodyW, size.height * 0.3f),
+            Size(termW, size.height * 0.4f), CornerRadius(termW / 2, termW / 2))
+        val pad = size.height * 0.2f
+        val innerMax = bodyW - 2 * pad
+        if (connected) drawRoundRect(fill, Offset(pad, pad),
+            Size((innerMax * level.coerceIn(0f, 1f)).coerceAtLeast(0f), size.height - 2 * pad),
+            CornerRadius(r * 0.5f, r * 0.5f))
+        if (charging && connected) {
+            val w = size.width; val h = size.height; val cx = bodyW / 2
+            val bolt = Path().apply {
+                moveTo(cx + w * 0.03f, h * 0.16f)
+                lineTo(cx - w * 0.07f, h * 0.56f)
+                lineTo(cx + w * 0.005f, h * 0.56f)
+                lineTo(cx - w * 0.03f, h * 0.84f)
+                lineTo(cx + w * 0.09f, h * 0.40f)
+                lineTo(cx + w * 0.01f, h * 0.40f)
+                close()
+            }
+            drawPath(bolt, HelmColors.Glass)
+        }
     }
 }
 

@@ -100,7 +100,8 @@ class NavRepository(private val context: Context) {
             error = if (r == null) "no route found" else null,
             guidance = r?.let { Navigator.guide(it, gps.lat, gps.lon) },
         )
-        if (r != null) Log.i(TAG, "route: %.1f km, %d steps".format(r.distanceM / 1000, r.steps.size))
+        if (r != null) Log.i(TAG, "route from %.5f,%.5f: %.1f km, %d steps"
+            .format(gps.lat, gps.lon, r.distanceM / 1000, r.steps.size))
     }
 
     fun clear() {

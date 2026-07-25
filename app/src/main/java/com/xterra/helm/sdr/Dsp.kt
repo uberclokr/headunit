@@ -149,6 +149,40 @@ class NbfmDemodulator(inputRate: Int) {
 }
 
 /**
+ * AM envelope demodulator for aviation (118–137 MHz), CB (27 MHz), and AM
+ * broadcast (direct-sampling MW). Magnitude of the IQ vector is the AM
+ * envelope; compute it at full rate, boxcar-decimate to 32 kHz (that average
+ * is the channel low-pass), then a slow one-pole DC estimate removes the
+ * carrier so only the modulation remains. No discriminator — AM carries the
+ * audio in amplitude, not phase.
+ */
+class AmDemodulator(inputRate: Int) {
+    private val decim = inputRate / WbfmDemodulator.AUDIO_RATE
+    private var dc = 20f      // running carrier level (envelope DC)
+
+    fun process(iq: ByteArray, samples: Int): ShortArray {
+        val outLen = samples / decim
+        val audio = ShortArray(outLen)
+        var ai = 0; var acc = 0f; var d = 0
+        var i = 0
+        while (i < samples && ai < outLen) {
+            val si = (iq[2 * i].toInt() and 0xFF) - 127.5f
+            val sq = (iq[2 * i + 1].toInt() and 0xFF) - 127.5f
+            acc += kotlin.math.sqrt(si * si + sq * sq)      // envelope at full rate
+            if (++d == decim) {
+                val env = acc / decim
+                acc = 0f; d = 0
+                dc += 0.0006f * (env - dc)                  // track carrier DC
+                val s = (env - dc) * 90f                    // strip carrier, scale
+                audio[ai++] = s.coerceIn(-32767f, 32767f).toInt().toShort()
+            }
+            i++
+        }
+        return if (ai == outLen) audio else audio.copyOf(ai)
+    }
+}
+
+/**
  * SAME/EAS decoder for NOAA weather radio audio (32 kHz mono).
  *
  * Two detectors, because AFSK decode off a crude NBFM chain is fragile:

@@ -110,7 +110,10 @@ dockable panes.
 paths `/live`, `/live2`, `/live3` must be verified with ffprobe against
 A329 firmware). `RtspView` = LibVLC, TCP, hw decode, 600 ms caching for
 non-critical panes, 150 ms for rear/drone. Thermal = UVC via libausbc;
-pane is a documented placeholder (`docs/THERMAL.md` has the fragment).
+`ThermalView` is a documented placeholder (`docs/THERMAL.md` has the
+fragment). Thermal is **nested inside the CAM pane** as a THERMAL chip
+alongside REAR/FRONT/CABIN (it's a separate UVC source, so a mode toggle,
+not a Viofo channel switch) — there is no standalone thermal dock button.
 
 **Status.** RTSP complete/uncompiled; thermal needs the ~20-line fragment
 and VID/PID filter.
@@ -149,28 +152,32 @@ CAN exposes SWC frames.
 
 ---
 
-## 7. SDR (RTL-SDR: FM browser + spectrum)
+## 7. SDR (RTL-SDR: broadcast + voice-comms bands)
 
-**Goal.** Tune/browse broadcast FM with live spectrum + waterfall; keep the
-pipeline generic enough to add decoders (ADS-B, NOAA/SAME, pagers) as modes.
+**Goal.** Tune broadcast FM/AM and the common US voice-comms services with a
+live spectrum + waterfall; keep the pipeline generic enough to add decoders
+(ADS-B, pagers) later.
 
-**Behavior/impl.** `RtlTcpClient` (rtl_tcp protocol; server = SDR Driver
-app on localhost, Termux rtl_tcp, or any LAN box) → 16 k IQ chunks →
-`WbfmDemodulator` (decimate → quadrature discriminator → 32 kHz mono →
-75 µs de-emphasis → AudioTrack) and `Fft.powerDb` (1024-pt Hann, shifted)
-→ trace + 90-row ember waterfall. Band scan 88–108 @ 200 kHz drops
-tappable station chips (RSSI threshold −25 dB — tune on real antenna).
+**Behavior/impl.** `RtlUsbSource` (in-app librtlsdr over the head unit's own
+USB) or `RtlTcpClient` (any LAN dongle) → 16 k IQ chunks → per-band
+demodulator + `Fft.powerDb` (1024-pt Hann) → trace + 90-row ember waterfall.
+Bands (`SdrBands`): **FM** (WBFM, scan + auto-tune), **AM** broadcast (MW via
+RTL2832 direct sampling — below the R820T's 24 MHz floor), **AIR** (118–137
+AM), **WX** (NOAA NBFM + SAME/WAT decode), **FRS/GMRS/MURS/MARINE** (NBFM
+channel plans), **CB** (27 MHz AM, ch1–40 with 9·EMG/19·HWY tagged), **2M/70CM**
+ham (NBFM). Three demods: `WbfmDemodulator`, `NbfmDemodulator`,
+`AmDemodulator` (envelope). Fixed-plan bands show a scrollable channel list;
+broadcast/aviation/ham tune continuously (band-scaled steps). Direct sampling
+is set automatically from the tuned frequency (`IqSource.setDirectSampling`,
+wired through the JNI to `rtlsdr_set_direct_sampling`).
 
-**Status.** Complete, uncompiled. Pure-Kotlin DSP is comfortably within
-RK3588 budget for 1.024 Msps mono WBFM.
+**Status.** Verified on the Edge2 with a live dongle: FRS ch1 (462.56), CB
+ch19 (27.185), band switching, channel lists, and the AM/direct-sampling path
+all receive without crashing.
 
-**Acceptance.** Clean audio on a strong local station; waterfall ≥ 10 fps
-alongside audio; scan finds every station a car radio finds; tune click
-< 200 ms.
-
-**Open.** Stereo pilot + RDS (JNI territory); presets in DataStore;
-squelch; NOAA WX mode (162.400–162.550 NBFM + SAME decoder — high value
-for EOC, see roadmap); frequency drag-to-tune on the spectrum.
+**Open.** Stereo pilot + RDS; presets in DataStore; squelch (esp. for the
+NBFM comms bands); PL/DPL/DCS tone display; frequency drag-to-tune;
+per-service scan (hunt an active FRS/GMRS channel).
 
 ---
 

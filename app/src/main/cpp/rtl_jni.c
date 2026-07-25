@@ -39,6 +39,12 @@ Java_com_xterra_helm_sdr_RtlSdrNative_setFrequency(JNIEnv *env, jclass cls, jlon
 }
 
 JNIEXPORT jint JNICALL
+Java_com_xterra_helm_sdr_RtlSdrNative_setDirectSampling(JNIEnv *env, jclass cls, jlong h, jint on)
+{
+    return rtlsdr_set_direct_sampling(DEV(h), (int)on);
+}
+
+JNIEXPORT jint JNICALL
 Java_com_xterra_helm_sdr_RtlSdrNative_setSampleRate(JNIEnv *env, jclass cls, jlong h, jint sps)
 {
     return rtlsdr_set_sample_rate(DEV(h), (uint32_t)sps);

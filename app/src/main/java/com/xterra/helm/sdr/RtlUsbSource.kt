@@ -43,6 +43,10 @@ class RtlUsbSource(private val context: Context) : IqSource {
         if (dev != 0L) RtlSdrNative.setFrequency(dev, hz)
     }
 
+    override fun setDirectSampling(mode: Int) {
+        if (dev != 0L) RtlSdrNative.setDirectSampling(dev, mode)
+    }
+
     override fun readFully(buf: ByteArray, n: Int): Boolean {
         val d = dev.takeIf { it != 0L } ?: return false
         var off = 0

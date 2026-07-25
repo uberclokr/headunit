@@ -7,22 +7,20 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
-/** SDR operation mode. FM broadcast + NOAA weather radio; the rtl pipe will
- *  later host ADS-B (1090), AIS, pager decoders as extra modes. */
-enum class SdrMode(val label: String) { FM("FM"), WX("WX") }
-
 data class SdrState(
     val running: Boolean = false,           // driver on/off (user-controlled)
     val connected: Boolean = false,         // IQ link actually up
-    val mode: SdrMode = SdrMode.FM,
+    val bandId: String = "fm",              // selected band (see SdrBands)
     val freqHz: Long = 98_100_000,
     val rssiDb: Float = -60f,
     val scanning: Boolean = false,
     val autoTuning: Boolean = false,
-    val stations: List<Long> = emptyList(), // found by band scan
+    val stations: List<Long> = emptyList(), // found by FM band scan
     val wxAlert: String? = null,            // SAME header / WAT notice
     val wxAlertAtMs: Long = 0,
-)
+) {
+    val band: SdrBand get() = SdrBands.byId(bandId)
+}
 
 /**
  * FM browser + spectrum source. One coroutine owns the IQ stream and
@@ -90,23 +88,26 @@ class SdrRepository(private val context: android.content.Context) {
     private suspend fun runLoop() {
         val wbfm = WbfmDemodulator(client.sampleRate)
         var nbfm = NbfmDemodulator(client.sampleRate)
+        var am = AmDemodulator(client.sampleRate)
         var same = SameDecoder()
-        var mode = _state.value.mode
+        var bandId = _state.value.bandId
         val chunk = ByteArray(CHUNK_IQ * 2)
         val fftRow = FloatArray(FFT_SIZE)
         openAudio()
         var n = 0
         while (currentCoroutineContext().isActive) {
             if (!client.readFully(chunk, chunk.size)) break
-            if (_state.value.mode != mode) {         // mode switch: fresh state
-                mode = _state.value.mode
+            if (_state.value.bandId != bandId) {     // band switch: fresh demod state
+                bandId = _state.value.bandId
                 nbfm = NbfmDemodulator(client.sampleRate)
+                am = AmDemodulator(client.sampleRate)
                 same = SameDecoder()
             }
-            val audio = when (mode) {
-                SdrMode.FM -> wbfm.process(chunk, CHUNK_IQ)
-                SdrMode.WX -> nbfm.process(chunk, CHUNK_IQ).also { a ->
-                    same.feed(a)?.let { alert ->
+            val audio = when (_state.value.band.demod) {
+                Demod.WBFM -> wbfm.process(chunk, CHUNK_IQ)
+                Demod.AM -> am.process(chunk, CHUNK_IQ)
+                Demod.NBFM -> nbfm.process(chunk, CHUNK_IQ).also { a ->
+                    if (bandId == "wx") same.feed(a)?.let { alert ->  // SAME only on NWR
                         android.util.Log.w(TAG, "WX ALERT: $alert")
                         _state.value = _state.value.copy(
                             wxAlert = alert, wxAlertAtMs = System.currentTimeMillis())
@@ -123,24 +124,22 @@ class SdrRepository(private val context: android.content.Context) {
         _state.value = _state.value.copy(connected = false)
     }
 
-    /** Switch FM ↔ WX; remembers the last frequency used in each mode. */
-    fun setMode(m: SdrMode) {
-        if (m == _state.value.mode) return
-        when (_state.value.mode) {
-            SdrMode.FM -> lastFm = _state.value.freqHz
-            SdrMode.WX -> lastWx = _state.value.freqHz
-        }
-        val f = when (m) { SdrMode.FM -> lastFm; SdrMode.WX -> lastWx }
-        _state.value = _state.value.copy(mode = m)
-        tune(f)
+    /** Switch band; remembers the last frequency used in each and lands there. */
+    fun setBand(b: SdrBand) {
+        if (b.id == _state.value.bandId) return
+        lastFreq[_state.value.bandId] = _state.value.freqHz
+        _state.value = _state.value.copy(bandId = b.id)
+        tune(lastFreq[b.id] ?: b.default)
     }
 
     fun clearWxAlert() { _state.value = _state.value.copy(wxAlert = null) }
 
-    private var lastFm = 98_100_000L
-    private var lastWx = WX_CHANNELS[6]     // 162.550 — most common allocation
+    private val lastFreq = HashMap<String, Long>()
 
     fun tune(hz: Long) {
+        // Below the R820T's ~24 MHz floor (AM broadcast) → direct-sample the
+        // RTL2832 Q-branch; above it, normal tuner path.
+        client.setDirectSampling(if (hz < 24_000_000) 2 else 0)
         client.setFrequency(hz)
         _state.value = _state.value.copy(freqHz = hz)
     }
@@ -198,10 +197,5 @@ class SdrRepository(private val context: android.content.Context) {
         const val CHUNK_IQ = 16384         // IQ pairs per read (~16 ms @1.024M)
         const val SCAN_THRESHOLD_DB = -25f
         private const val TAG = "Helm"
-        /** NWR channels WX1–WX7 (162.400–162.550, 25 kHz spacing). */
-        val WX_CHANNELS = longArrayOf(
-            162_400_000, 162_425_000, 162_450_000, 162_475_000,
-            162_500_000, 162_525_000, 162_550_000,
-        )
     }
 }

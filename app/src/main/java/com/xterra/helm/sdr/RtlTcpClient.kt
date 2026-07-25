@@ -40,6 +40,7 @@ class RtlTcpClient(private val host: String = "127.0.0.1", private val port: Int
     }
 
     override fun setFrequency(hz: Long) = cmd(0x01, hz.toInt())
+    override fun setDirectSampling(mode: Int) = cmd(0x09, mode)   // rtl_tcp SET_DIRECT_SAMPLING
     fun setSampleRate(sps: Int) { sampleRate = sps; cmd(0x02, sps) }
     fun setGainMode(auto: Boolean) = cmd(0x03, if (auto) 0 else 1)
     fun setGain(tenthsDb: Int) { setGainMode(false); cmd(0x04, tenthsDb) }

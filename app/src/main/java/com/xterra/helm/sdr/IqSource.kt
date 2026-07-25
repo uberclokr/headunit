@@ -13,6 +13,13 @@ interface IqSource {
     suspend fun open()
     fun setFrequency(hz: Long)
 
+    /**
+     * Direct-sampling mode: 0 = off (normal, tuner ≥ 24 MHz), 2 = Q-branch
+     * (HF/MW below the tuner's floor — AM broadcast, CB SSB). Bypasses the
+     * R820T so the RTL2832 samples the antenna directly. No-op by default.
+     */
+    fun setDirectSampling(mode: Int) {}
+
     /** Blocking read of exactly [n] bytes into [buf]; false on stream loss. */
     fun readFully(buf: ByteArray, n: Int): Boolean
     fun close()

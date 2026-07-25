@@ -18,20 +18,23 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.xterra.helm.HelmApp
-import com.xterra.helm.sdr.SdrMode
+import com.xterra.helm.sdr.SdrBands
 import com.xterra.helm.ui.theme.HelmColors
 
 /**
- * SDR pane. Mode selector picks the sub-operation (only FM for now); FM shows
- * a live spectrum/waterfall with coarse + fine tuning, an auto-tune that peaks
- * the carrier (fixes crystal-drift offset), band scan, and an explicit
- * start/stop so the driver releases the dongle when unused.
+ * SDR pane. A band selector (FM/AM broadcast, aviation, NOAA weather, and the
+ * voice-comms services — FRS, GMRS, MURS, marine, CB, ham 2m/70cm) picks the
+ * demodulator + channel plan. Fixed-plan bands show a scrollable channel list;
+ * broadcast/aviation bands tune continuously with a spectrum/waterfall, band
+ * scan (FM) and auto-tune (drift correction). Explicit start/stop releases the
+ * dongle when unused.
  */
 @Composable
 fun SdrWidget() {
     val repo = HelmApp.instance.sdr
     val state by repo.state.collectAsState()
     val row by repo.spectrum.collectAsState()
+    val band = state.band
 
     val history = remember { ArrayDeque<FloatArray>() }
     LaunchedEffect(row) {
@@ -40,13 +43,15 @@ fun SdrWidget() {
     }
 
     Column(Modifier.fillMaxSize().padding(14.dp)) {
-        // Mode selector + power toggle
-        Row(verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            SdrMode.entries.forEach { m ->
-                Chip(m.label, active = state.mode == m) { repo.setMode(m) }
+        // Band selector (scrollable) + power toggle pinned right.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SdrBands.ALL.forEach { b ->
+                    Chip(b.label, active = state.bandId == b.id) { repo.setBand(b) }
+                }
             }
-            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.width(8.dp))
             if (state.running) {
                 Chip("■ STOP", active = false, danger = true) { repo.stop() }
             } else {
@@ -68,7 +73,7 @@ fun SdrWidget() {
             Text("%.2f".format(state.freqHz / 1e6),
                 style = MaterialTheme.typography.displayLarge,
                 color = if (state.connected) HelmColors.Amber else HelmColors.TextDim)
-            Text(" MHz ${state.mode.label}", style = MaterialTheme.typography.bodyMedium,
+            Text(" MHz ${band.label}", style = MaterialTheme.typography.bodyMedium,
                 color = HelmColors.TextDim)
             Spacer(Modifier.weight(1f))
             Text(
@@ -113,27 +118,30 @@ fun SdrWidget() {
         }
         Spacer(Modifier.height(8.dp))
 
-        if (state.mode == SdrMode.WX) {
-            // NWR channel chips — WX7 (162.550) covers most of Oregon coast.
+        // Known-channel list for this band (FRS/GMRS/CB/marine/WX/AIR/ham…).
+        if (band.channels.isNotEmpty()) {
             Row(Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                com.xterra.helm.sdr.SdrRepository.WX_CHANNELS.forEachIndexed { i, f ->
-                    Chip("WX${i + 1} %.3f".format(f / 1e6), f == state.freqHz) { repo.tune(f) }
+                band.channels.forEach { ch ->
+                    Chip(ch.label, active = ch.hz == state.freqHz) { repo.tune(ch.hz) }
                 }
             }
             Spacer(Modifier.height(8.dp))
-            state.wxAlert?.let {
-                Row(verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(it, style = MaterialTheme.typography.bodyMedium,
-                        color = HelmColors.Alert, modifier = Modifier.weight(1f))
-                    Chip("CLEAR", false) { repo.clearWxAlert() }
-                }
-                Spacer(Modifier.height(8.dp))
-            }
         }
 
-        if (state.mode == SdrMode.FM && state.stations.isNotEmpty()) {
+        // NWR SAME/WAT alert banner (weather band only).
+        state.wxAlert?.let {
+            Row(verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(it, style = MaterialTheme.typography.bodyMedium,
+                    color = HelmColors.Alert, modifier = Modifier.weight(1f))
+                Chip("CLEAR", false) { repo.clearWxAlert() }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+
+        // FM band-scan finds (tap to tune).
+        if (band.id == "fm" && state.stations.isNotEmpty()) {
             Row(Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 state.stations.forEach { f ->
@@ -143,30 +151,22 @@ fun SdrWidget() {
             Spacer(Modifier.height(8.dp))
         }
 
-        // Coarse tune + scan (FM only — WX uses fixed channels)
-        if (state.mode == SdrMode.FM) {
+        // Continuous-tuning controls (broadcast/aviation/ham). Step sizes scale
+        // with the band; FM adds a scan, all get auto-tune drift correction.
+        if (band.continuous) {
+            val s = band.stepKhz
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Chip("−200k", false) { repo.step(-200) }
-                Chip("−100k", false) { repo.step(-100) }
-                Chip("+100k", false) { repo.step(100) }
-                Chip("+200k", false) { repo.step(200) }
+                Chip("−${s * 4}k", false) { repo.step(-s * 4) }
+                Chip("−${s}k", false) { repo.step(-s) }
+                Chip("+${s}k", false) { repo.step(s) }
+                Chip("+${s * 4}k", false) { repo.step(s * 4) }
                 Spacer(Modifier.weight(1f))
-                Chip(if (state.scanning) "SCANNING…" else "SCAN", state.scanning) {
+                if (band.id == "fm") Chip(if (state.scanning) "SCANNING…" else "SCAN", state.scanning) {
                     if (!state.scanning) repo.scanFmBand()
                 }
-            }
-            Spacer(Modifier.height(8.dp))
-        }
-
-        // Fine tune + auto-tune (drift correction)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Chip("−50k", false) { repo.step(-50) }
-            Chip("−10k", false) { repo.step(-10) }
-            Chip("+10k", false) { repo.step(10) }
-            Chip("+50k", false) { repo.step(50) }
-            Spacer(Modifier.weight(1f))
-            Chip(if (state.autoTuning) "TUNING…" else "◎ AUTO", state.autoTuning) {
-                if (!state.autoTuning) repo.autoTune()
+                Chip(if (state.autoTuning) "TUNING…" else "◎ AUTO", state.autoTuning) {
+                    if (!state.autoTuning) repo.autoTune()
+                }
             }
         }
     }

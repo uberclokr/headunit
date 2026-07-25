@@ -10,9 +10,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xterra.helm.nav.route.Guidance
@@ -107,14 +110,23 @@ fun durStr(ms: Long): String {
  * to [NavState]; renders nothing when not navigating.
  */
 @Composable
-fun BoxScope.TurnBanner(nav: NavState, onEnd: () -> Unit, voiceMuted: Boolean, onToggleVoice: () -> Unit) {
+fun BoxScope.TurnBanner(
+    nav: NavState, onEnd: () -> Unit, voiceMuted: Boolean, onToggleVoice: () -> Unit,
+    onHeight: (Dp) -> Unit = {},
+) {
     val route = nav.route ?: return
     val g = nav.guidance
+    val density = LocalDensity.current
     Column(
         Modifier.align(Alignment.TopCenter).padding(top = 8.dp)
             .widthIn(min = 300.dp, max = 560.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(HelmColors.Panel.copy(alpha = 0.94f)),
+            .background(HelmColors.Panel.copy(alpha = 0.94f))
+            // Report full height (incl. the 8.dp top gap) so the map's corner
+            // control clusters can drop below the banner in a narrow split pane.
+            .onGloballyPositioned {
+                onHeight(with(density) { it.size.height.toDp() } + 8.dp)
+            },
     ) {
         val offRoute = nav.computing || (g != null && !g.onRoute && !g.arrived)
         Row(

@@ -87,6 +87,8 @@ fun NavMap() {
     val nav by HelmApp.instance.nav.state.collectAsState()
     val voice = remember { NavVoice(ctx) }
     var voiceMuted by remember { mutableStateOf(false) }
+    // Measured banner height → how far to drop the corner controls beneath it.
+    var bannerH by remember { mutableStateOf(0.dp) }
     DisposableEffect(Unit) { onDispose { voice.shutdown() } }
     LaunchedEffect(voiceMuted) { voice.muted = voiceMuted }
 
@@ -94,7 +96,7 @@ fun NavMap() {
     LaunchedEffect(nav.route) {
         mapRef.value?.style?.getSourceAs<GeoJsonSource>(ROUTE_SRC)
             ?.setGeoJson(routeGeoJson(nav.route))
-        if (nav.route != null) voice.reset()
+        if (nav.route != null) voice.reset() else bannerH = 0.dp
     }
     // Speak the upcoming maneuver as it comes into range / at the turn.
     LaunchedEffect(nav.guidance) { voice.announce(nav.guidance) }
@@ -213,13 +215,18 @@ fun NavMap() {
             onEnd = { HelmApp.instance.nav.clear() },
             voiceMuted = voiceMuted,
             onToggleVoice = { voiceMuted = !voiceMuted },
+            onHeight = { bannerH = it },
         )
 
         // Corner layout: wide rows hug the corners, short chips ride the
-        // edges, so the center of the map stays clear.
+        // edges, so the center of the map stays clear. While navigating, the
+        // top clusters drop below the turn banner (narrow split panes overlap
+        // otherwise) — measured height, so it tracks the banner's actual size.
+        val topInset = if (bannerH > 0.dp) bannerH + 6.dp else 10.dp
         // Top-right: base-layer row only.
         Row(
-            Modifier.align(Alignment.TopEnd).padding(10.dp),
+            Modifier.align(Alignment.TopEnd)
+                .padding(start = 10.dp, end = 10.dp, bottom = 10.dp, top = topInset),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             MapStyles.Base.entries.forEach { b ->
@@ -230,7 +237,8 @@ fun NavMap() {
         // Top-left: waypoint counter + offline-cache cluster (the long CACHE
         // chip lives in this corner, away from the map center).
         Column(
-            Modifier.align(Alignment.TopStart).padding(10.dp),
+            Modifier.align(Alignment.TopStart)
+                .padding(start = 10.dp, end = 10.dp, bottom = 10.dp, top = topInset),
             horizontalAlignment = Alignment.Start,
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {

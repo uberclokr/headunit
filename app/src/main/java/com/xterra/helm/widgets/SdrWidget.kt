@@ -118,6 +118,28 @@ fun SdrWidget() {
         }
         Spacer(Modifier.height(8.dp))
 
+        // Squelch: gate audio on carrier power (kills idle-channel hiss). The
+        // live dot shows whether the gate is currently open (signal present).
+        Row(verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Chip("SQ ${state.squelchDb.toInt()} dB", active = state.squelchOn) { repo.toggleSquelch() }
+            Chip("−", false) { repo.adjustSquelch(-2f) }
+            Chip("+", false) { repo.adjustSquelch(2f) }
+            Text(
+                when {
+                    !state.squelchOn -> "OPEN (squelch off)"
+                    state.squelchOpen -> "● SIGNAL"
+                    else -> "○ muted"
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = when {
+                    !state.squelchOn -> HelmColors.TextDim
+                    state.squelchOpen -> HelmColors.Ok
+                    else -> HelmColors.TextDim
+                })
+        }
+        Spacer(Modifier.height(8.dp))
+
         // Known-channel list for this band (FRS/GMRS/CB/marine/WX/AIR/ham…).
         if (band.channels.isNotEmpty()) {
             Row(Modifier.horizontalScroll(rememberScrollState()),

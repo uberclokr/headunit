@@ -175,9 +175,13 @@ wired through the JNI to `rtlsdr_set_direct_sampling`).
 ch19 (27.185), band switching, channel lists, and the AM/direct-sampling path
 all receive without crashing.
 
-**Open.** Stereo pilot + RDS; presets in DataStore; squelch (esp. for the
-NBFM comms bands); PL/DPL/DCS tone display; frequency drag-to-tune;
-per-service scan (hunt an active FRS/GMRS channel).
+**Squelch.** Carrier-power gate (`SdrRepository`): RSSI computed every chunk,
+audio muted below an adjustable threshold (default −20 dB) with 4 dB hysteresis
+so marginal signals don't chatter; SAME still decodes pre-gate. UI shows the
+threshold (±2 dB) and a live SIGNAL/muted dot. Verified on-device on FRS.
+
+**Open.** Stereo pilot + RDS; presets in DataStore; PL/DPL/DCS tone display;
+frequency drag-to-tune; per-service scan (hunt an active FRS/GMRS channel).
 
 ---
 

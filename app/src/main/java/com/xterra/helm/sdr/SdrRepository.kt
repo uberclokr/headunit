@@ -18,6 +18,9 @@ data class SdrState(
     val stations: List<Long> = emptyList(), // found by FM band scan
     val wxAlert: String? = null,            // SAME header / WAT notice
     val wxAlertAtMs: Long = 0,
+    val squelchOn: Boolean = true,          // gate audio on carrier power
+    val squelchDb: Float = -20f,            // open threshold (RSSI dB)
+    val squelchOpen: Boolean = true,        // live gate state (signal present)
 ) {
     val band: SdrBand get() = SdrBands.byId(bandId)
 }
@@ -93,6 +96,8 @@ class SdrRepository(private val context: android.content.Context) {
         var bandId = _state.value.bandId
         val chunk = ByteArray(CHUNK_IQ * 2)
         val fftRow = FloatArray(FFT_SIZE)
+        val silence = ShortArray(CHUNK_IQ)   // written when squelched (keeps track fed)
+        var sqOpen = true                    // squelch gate, with hysteresis
         openAudio()
         var n = 0
         while (currentCoroutineContext().isActive) {
@@ -114,14 +119,29 @@ class SdrRepository(private val context: android.content.Context) {
                     }
                 }
             }
-            track?.write(audio, 0, audio.size)
+            // Carrier squelch: gate audio on RSSI (computed every chunk for
+            // responsiveness). 4 dB hysteresis so a marginal signal doesn't
+            // chatter open/closed. SAME still decodes above (fed pre-gate).
+            val rssi = wbfm.rssiDb(chunk, CHUNK_IQ)
+            val th = _state.value.squelchDb
+            sqOpen = if (sqOpen) rssi > th - 4f else rssi > th
+            val pass = !_state.value.squelchOn || sqOpen
+            if (pass) track?.write(audio, 0, audio.size)
+            else track?.write(silence, 0, audio.size)
             if (n++ % 4 == 0) {
                 Fft.powerDb(chunk, FFT_SIZE, fftRow)
                 spectrum.value = fftRow.copyOf()
-                _state.value = _state.value.copy(rssiDb = wbfm.rssiDb(chunk, CHUNK_IQ))
+                _state.value = _state.value.copy(rssiDb = rssi, squelchOpen = sqOpen)
             }
         }
         _state.value = _state.value.copy(connected = false)
+    }
+
+    fun toggleSquelch() =
+        _state.value.let { _state.value = it.copy(squelchOn = !it.squelchOn) }
+
+    fun adjustSquelch(db: Float) = _state.value.let {
+        _state.value = it.copy(squelchDb = (it.squelchDb + db).coerceIn(-60f, 10f))
     }
 
     /** Switch band; remembers the last frequency used in each and lands there. */

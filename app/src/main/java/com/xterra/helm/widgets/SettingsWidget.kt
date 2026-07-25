@@ -165,7 +165,99 @@ fun SettingsWidget() {
         }
 
         Spacer(Modifier.height(10.dp))
+        OfflineCacheSection()
+
+        Spacer(Modifier.height(10.dp))
         CompanionSection()
+    }
+}
+
+/**
+ * Offline storage manager for the nav subsystem — the single place to manage
+ * both cache classes. Map tiles: the regions captured by the nav pane's
+ * CACHE THIS VIEW (per-region delete, total) plus a clear for the automatic
+ * "everywhere you've viewed" ambient cache. Navigation: the offline routing
+ * graph (size, loaded state, delete). Capture stays on the map (it needs a
+ * framed viewport); everything else lives here.
+ */
+@Composable
+private fun OfflineCacheSection() {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var regions by remember { mutableStateOf<List<com.xterra.helm.nav.OfflineRegions.Info>?>(null) }
+    var reload by remember { mutableStateOf(0) }
+    LaunchedEffect(reload) { com.xterra.helm.nav.OfflineRegions.list(ctx) { regions = it } }
+
+    val nav by HelmApp.instance.nav.state.collectAsState()
+    var graphMb by remember { mutableStateOf<Double?>(null) }
+    var reloadGraph by remember { mutableStateOf(0) }
+    LaunchedEffect(reloadGraph) {
+        graphMb = withContext(Dispatchers.IO) { HelmApp.instance.nav.graphSizeBytes() / 1_048_576.0 }
+    }
+    var ambientMsg by remember { mutableStateOf<String?>(null) }
+
+    Text("OFFLINE MAPS & NAV",
+        style = MaterialTheme.typography.titleMedium, color = HelmColors.Amber)
+
+    // ── Map tiles ────────────────────────────────────────────────────────
+    Text("MAP TILES", style = MaterialTheme.typography.labelMedium, color = HelmColors.Cyan)
+    when {
+        regions == null -> Text("loading…",
+            style = MaterialTheme.typography.bodyMedium, color = HelmColors.TextDim)
+        regions!!.isEmpty() -> Text("no regions cached — frame an area on the nav map and tap CACHE THIS VIEW",
+            style = MaterialTheme.typography.bodyMedium, color = HelmColors.TextDim)
+        else -> {
+            regions!!.forEach { info ->
+                Row(verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(Modifier.weight(1f)) {
+                        Text(info.name, style = MaterialTheme.typography.bodyMedium, color = HelmColors.Text)
+                        Text("${info.tiles} tiles · %.0f MB".format(info.mb) +
+                                if (info.complete) "" else " · partial",
+                            style = MaterialTheme.typography.labelSmall, color = HelmColors.TextDim)
+                    }
+                    Btn("DELETE") { com.xterra.helm.nav.OfflineRegions.delete(info) { reload++ } }
+                }
+            }
+            Text("tiles total %.0f MB".format(regions!!.sumOf { it.mb }),
+                style = MaterialTheme.typography.labelSmall, color = HelmColors.Cyan)
+        }
+    }
+    // Ambient (auto) cache — everywhere already viewed; clearable to reclaim space.
+    Row(verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(ambientMsg ?: "viewed-area cache (auto, up to 1 GB)",
+            style = MaterialTheme.typography.labelSmall, color = HelmColors.TextDim,
+            modifier = Modifier.weight(1f))
+        Btn("CLEAR") {
+            ambientMsg = "clearing…"
+            org.maplibre.android.offline.OfflineManager.getInstance(ctx).clearAmbientCache(
+                object : org.maplibre.android.offline.OfflineManager.FileSourceCallback {
+                    override fun onSuccess() { ambientMsg = "viewed-area cache cleared" }
+                    override fun onError(message: String) { ambientMsg = "clear failed: $message" }
+                })
+        }
+    }
+
+    // ── Routing graph ─────────────────────────────────────────────────────
+    Text("NAVIGATION", style = MaterialTheme.typography.labelMedium, color = HelmColors.Cyan)
+    Row(verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.weight(1f)) {
+            val mb = graphMb
+            Text("Offline routing graph",
+                style = MaterialTheme.typography.bodyMedium, color = HelmColors.Text)
+            Text(
+                when {
+                    mb == null -> "measuring…"
+                    mb < 1.0 -> "not installed"
+                    else -> "%.0f MB · %s".format(
+                        mb, if (nav.engineReady) "loaded" else "present, not loaded")
+                },
+                style = MaterialTheme.typography.labelSmall, color = HelmColors.TextDim)
+        }
+        if ((graphMb ?: 0.0) >= 1.0) {
+            Btn("DELETE") { HelmApp.instance.nav.deleteGraph { reloadGraph++ } }
+        }
     }
 }
 

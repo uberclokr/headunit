@@ -80,9 +80,13 @@ fun NavMap() {
     // LoRaWAN tracker nodes — shown as green dots when the LNS is enabled.
     val loraStates by HelmApp.instance.lora.states.collectAsState()
     val loraCfg by HelmApp.instance.lora.config.collectAsState()
-    // Offline region-download progress text + region manager visibility.
+    // Offline region-download progress text (region management lives in Settings).
     var cacheMsg by remember { mutableStateOf<String?>(null) }
-    var showRegions by remember { mutableStateOf(false) }
+    // Address / business search (online geocode → offline route).
+    var searchOpen by remember { mutableStateOf(false) }
+    var query by remember { mutableStateOf("") }
+    var results by remember { mutableStateOf<List<com.xterra.helm.nav.route.Place>>(emptyList()) }
+    var searchBusy by remember { mutableStateOf(false) }
     // Turn-by-turn: live route/guidance + offline voice prompts.
     val nav by HelmApp.instance.nav.state.collectAsState()
     val voice = remember { NavVoice(ctx) }
@@ -98,6 +102,18 @@ fun NavMap() {
             ?.setGeoJson(routeGeoJson(nav.route))
         if (nav.route != null) voice.reset() else bannerH = 0.dp
     }
+    // Debounced geocode: re-query ~350 ms after typing stops, biased to the fix.
+    LaunchedEffect(query) {
+        if (query.trim().length < 3) { results = emptyList(); searchBusy = false; return@LaunchedEffect }
+        kotlinx.coroutines.delay(350)
+        searchBusy = true
+        results = withContext(Dispatchers.IO) {
+            com.xterra.helm.nav.route.Geocoder.search(
+                query, gps.lat.takeIf { gps.hasFix }, gps.lon.takeIf { gps.hasFix })
+        }
+        searchBusy = false
+    }
+
     // Speak the upcoming maneuver as it comes into range / at the turn.
     LaunchedEffect(nav.guidance) { voice.announce(nav.guidance) }
     // Announce a reroute the moment we drop off the line.
@@ -242,18 +258,31 @@ fun NavMap() {
             horizontalAlignment = Alignment.Start,
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
+            // Search a place/business, then route to it (online lookup only).
+            LayerChip("🔍 SEARCH", active = searchOpen) {
+                searchOpen = !searchOpen; if (!searchOpen) { query = ""; results = emptyList() }
+            }
             val n = pois.features()?.size ?: 0
             LayerChip(if (n == 0) "⌖ long-press to drop WP" else "⌖ $n WP", active = false) {}
             // Download the current view for offline use (frame the area first).
+            // Region/graph management lives in the Settings pane.
             LayerChip(cacheMsg ?: "⤓ CACHE THIS VIEW", active = cacheMsg != null) {
                 if (cacheMsg == null) mapRef.value?.let { m ->
                     downloadRegion(ctx, m, base) { cacheMsg = it }
                 }
             }
-            LayerChip("⛃ CACHE", active = false) { showRegions = true }
         }
 
-        if (showRegions) RegionsDialog(onDismiss = { showRegions = false })
+        if (searchOpen) SearchPanel(
+            query = query, onQuery = { query = it },
+            results = results, busy = searchBusy,
+            engineReady = nav.engineReady,
+            onPick = { p ->
+                HelmApp.instance.nav.navigateTo(p.lat, p.lon, p.name)
+                searchOpen = false; query = ""; results = emptyList()
+            },
+            onClose = { searchOpen = false; query = ""; results = emptyList() },
+        )
 
         // Selected waypoint card: rename inline, quick delete.
         selected?.let { (id, name) ->
@@ -539,96 +568,6 @@ private fun hasLocationPermission(ctx: Context) =
     ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.ACCESS_FINE_LOCATION) ==
         PackageManager.PERMISSION_GRANTED
 
-/**
- * Offline-cache manager for both cache classes the user cares about:
- * map tiles (MapLibre offline regions, per-region delete) and the navigation
- * routing graph (size + delete). One dialog so storage is managed in one place.
- */
-@Composable
-private fun RegionsDialog(onDismiss: () -> Unit) {
-    val ctx = LocalContext.current
-    var regions by remember { mutableStateOf<List<OfflineRegions.Info>?>(null) }
-    var reload by remember { mutableStateOf(0) }
-    LaunchedEffect(reload) { OfflineRegions.list(ctx) { regions = it } }
-
-    val nav by HelmApp.instance.nav.state.collectAsState()
-    var graphMb by remember { mutableStateOf<Double?>(null) }
-    var reloadGraph by remember { mutableStateOf(0) }
-    LaunchedEffect(reloadGraph) {
-        graphMb = withContext(Dispatchers.IO) {
-            HelmApp.instance.nav.graphSizeBytes() / 1_048_576.0
-        }
-    }
-
-    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
-        Column(
-            Modifier.clip(RoundedCornerShape(14.dp))
-                .background(HelmColors.Panel)
-                .padding(18.dp).widthIn(min = 340.dp).widthIn(max = 460.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text("OFFLINE CACHE", style = MaterialTheme.typography.titleMedium,
-                color = HelmColors.Amber)
-
-            // ── Map tiles ────────────────────────────────────────────────
-            Text("MAP TILES", style = MaterialTheme.typography.labelMedium,
-                color = HelmColors.Cyan)
-            when {
-                regions == null -> Text("loading…",
-                    style = MaterialTheme.typography.bodyMedium, color = HelmColors.TextDim)
-                regions!!.isEmpty() -> Text("no regions cached — frame an area and CACHE THIS VIEW",
-                    style = MaterialTheme.typography.bodyMedium, color = HelmColors.TextDim)
-                else -> {
-                    regions!!.forEach { info ->
-                        Row(verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Column(Modifier.weight(1f)) {
-                                Text(info.name, style = MaterialTheme.typography.bodyMedium,
-                                    color = HelmColors.Text)
-                                Text("${info.tiles} tiles · %.0f MB".format(info.mb) +
-                                        if (info.complete) "" else " · partial",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = HelmColors.TextDim)
-                            }
-                            LayerChip("DELETE", active = false) {
-                                OfflineRegions.delete(info) { reload++ }
-                            }
-                        }
-                    }
-                    Text("tiles total %.0f MB".format(regions!!.sumOf { it.mb }),
-                        style = MaterialTheme.typography.labelSmall, color = HelmColors.Cyan)
-                }
-            }
-
-            // ── Routing graph ────────────────────────────────────────────
-            Text("NAVIGATION", style = MaterialTheme.typography.labelMedium,
-                color = HelmColors.Cyan)
-            Row(verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Column(Modifier.weight(1f)) {
-                    val mb = graphMb
-                    Text("Offline routing graph",
-                        style = MaterialTheme.typography.bodyMedium, color = HelmColors.Text)
-                    Text(
-                        when {
-                            mb == null -> "measuring…"
-                            mb < 1.0 -> "not installed"
-                            else -> "%.0f MB · %s".format(
-                                mb, if (nav.engineReady) "loaded" else "present, not loaded")
-                        },
-                        style = MaterialTheme.typography.labelSmall, color = HelmColors.TextDim)
-                }
-                if ((graphMb ?: 0.0) >= 1.0) {
-                    LayerChip("DELETE", active = false) {
-                        HelmApp.instance.nav.deleteGraph { reloadGraph++ }
-                    }
-                }
-            }
-
-            LayerChip("CLOSE", active = false) { onDismiss() }
-        }
-    }
-}
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable

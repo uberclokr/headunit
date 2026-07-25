@@ -247,14 +247,23 @@ memory-mapped so heap stays flat; CH prepared at import. Pure guidance math
 distance-to-turn, ETA, off-route and auto-reroute. UI (`NavGuidanceUi.kt`):
 cyan route line, top-center turn banner (glyph + distance + street + trip
 strip), tap-a-waypoint-to-navigate. Offline voice via on-device TTS
-(`NavVoice.kt`). Both caches — map tiles and the routing graph — are managed
-in-app from the **⛃ CACHE** dialog. Full build/provision runbook and the two
-Android/ART gotchas (mmap vs OOM, the `SourceVersion` shim) in
-[`NAV_OFFLINE.md`](NAV_OFFLINE.md).
+(`NavVoice.kt`).
 
-**Status.** Engine + guidance verified on the Edge2 (live fix → Portland,
-180.6 km / 29 steps). UI wired to `NavRepository` StateFlow.
+**Search** (`nav/route/Geocoder.kt`): address/business lookup via Photon
+(OSM, keyless — the one online call in the nav path; routing stays offline).
+Results are re-ranked client-side by true distance from the fix so the
+nearest match leads, shown with distances; picking one routes to it offline.
+
+**Cache management** lives in the Settings pane ("OFFLINE MAPS & NAV"):
+map-tile regions (per-region delete, total), the auto "viewed-area" ambient
+cache (clear), and the routing graph (size, loaded state, delete). The nav
+pane keeps a single **CACHE THIS VIEW** capture button (it needs the framed
+viewport). Full build/provision runbook and the two Android/ART gotchas
+(mmap vs OOM, the `SourceVersion` shim) in [`NAV_OFFLINE.md`](NAV_OFFLINE.md).
+
+**Status.** Engine + guidance + search verified on the Edge2 (search
+"Starbucks" → nearest at 0.1 mi → 0.4 mi offline route). UI wired to
+`NavRepository` StateFlow.
 
 **Open.** Traveled-vs-remaining route styling (split the line at the snap
-point); lane/exit hints; search-to-destination (offline geocode) beyond
-waypoint-tap; settings-screen home/work presets.
+point); lane/exit hints; settings-screen home/work destination presets.

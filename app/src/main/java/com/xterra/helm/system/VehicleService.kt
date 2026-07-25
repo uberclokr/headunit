@@ -92,6 +92,23 @@ class VehicleService : LifecycleService() {
         }
     }
 
+    // Geocoder self-test (validates online Photon search + parsing on-device):
+    //   adb shell am broadcast -a com.xterra.helm.NAV_SEARCH --es q "coffee"
+    private val navSearch = object : BroadcastReceiver() {
+        override fun onReceive(c: Context?, i: Intent?) {
+            val q = i?.getStringExtra("q") ?: "coffee"
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                val gps = HelmApp.instance.gps.state.value
+                val hits = com.xterra.helm.nav.route.Geocoder.search(
+                    q, gps.lat.takeIf { gps.hasFix }, gps.lon.takeIf { gps.hasFix })
+                android.util.Log.i("Helm", "NAV_SEARCH \"$q\": ${hits.size} hits")
+                hits.take(6).forEach {
+                    android.util.Log.i("Helm", "  ${it.name} · ${it.label} · %.4f,%.4f".format(it.lat, it.lon))
+                }
+            }
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         startForeground(NOTIF_ID, notification())
@@ -102,6 +119,7 @@ class VehicleService : LifecycleService() {
         registerReceiver(slDump, IntentFilter("com.xterra.helm.SL_DUMP"), RECEIVER_EXPORTED)
         registerReceiver(navTest, IntentFilter("com.xterra.helm.NAV_TEST"), RECEIVER_EXPORTED)
         registerReceiver(navGo, IntentFilter("com.xterra.helm.NAV_GO"), RECEIVER_EXPORTED)
+        registerReceiver(navSearch, IntentFilter("com.xterra.helm.NAV_SEARCH"), RECEIVER_EXPORTED)
         HelmApp.instance.can.start()
         HelmApp.instance.media.start()
         HelmApp.instance.homeLink.start()

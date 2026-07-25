@@ -111,13 +111,26 @@ expression compiler (Janino), which won't run under ART.
 
 ## Cache management
 
-In-app on the nav pane: the **⛃ CACHE** chip opens a manager covering both
-offline-cache classes:
+Management lives in the **Settings** pane ("OFFLINE MAPS & NAV"), covering both
+offline-cache classes in one place:
 
-- **Map tiles** — MapLibre offline regions (frame a view, *CACHE THIS VIEW*),
-  listed with tile counts + size, per-region delete, plus the 1 GB ambient LRU
-  cache for anywhere already viewed.
+- **Map tiles** — MapLibre offline regions listed with tile counts + size and
+  per-region delete, plus a clear for the 1 GB ambient LRU cache (everywhere
+  already viewed). Regions are *captured* on the nav pane's single **CACHE THIS
+  VIEW** button — it needs a framed viewport, so it stays on the map.
 - **Navigation** — the routing graph: size, loaded state, and delete (tears the
   engine down; routing is unavailable until re-provisioned per above).
+
+## Search
+
+`nav/route/Geocoder.kt` — address/business lookup via **Photon**
+(photon.komoot.io, OSM, keyless). This is the only online dependency in the nav
+path; it just turns a typed query into coordinates, then the route is computed
+offline. Photon's public proximity weighting is weak, so results are over-
+fetched with a location bias and **re-ranked client-side by true distance** from
+the fix — the nearest match leads (e.g. "Starbucks" → the one 0.1 mi away, not a
+same-named store three states over). The nav pane's 🔍 SEARCH field shows
+name + address + distance; picking a result calls `navigateTo`. Fails soft
+(empty list) when offline.
 
 [osmium-tool]: https://osmcode.org/osmium-tool/

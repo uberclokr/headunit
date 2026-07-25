@@ -3,15 +3,20 @@ package com.xterra.helm.nav
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -21,6 +26,7 @@ import androidx.compose.ui.unit.sp
 import com.xterra.helm.nav.route.Guidance
 import com.xterra.helm.nav.route.Maneuver
 import com.xterra.helm.nav.route.NavState
+import com.xterra.helm.nav.route.Place
 import com.xterra.helm.nav.route.Route
 import com.xterra.helm.ui.theme.HelmColors
 import kotlin.math.roundToInt
@@ -192,6 +198,86 @@ fun BoxScope.TurnBanner(
                 nav.destinationName?.let { name ->
                     Text("→ $name", fontSize = 13.sp, color = HelmColors.TextDim,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
+}
+
+// ── Address / business search panel ──────────────────────────────────────────
+
+/**
+ * Search overlay: a text field plus geocoder results. Picking a result routes
+ * to it (the caller calls navigateTo). Online lookup only — the routing that
+ * follows is offline. Anchored top-left, overlaying the corner controls while
+ * open; closes on ✕ or after a pick.
+ */
+@Composable
+fun BoxScope.SearchPanel(
+    query: String, onQuery: (String) -> Unit,
+    results: List<Place>, busy: Boolean, engineReady: Boolean,
+    onPick: (Place) -> Unit, onClose: () -> Unit,
+) {
+    Column(
+        Modifier.align(Alignment.TopStart).padding(10.dp)
+            .widthIn(min = 300.dp, max = 380.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(HelmColors.Panel.copy(alpha = 0.96f))
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("🔍", fontSize = 16.sp)
+            BasicTextField(
+                value = query, onValueChange = onQuery, singleLine = true,
+                textStyle = TextStyle(color = HelmColors.Text, fontSize = 15.sp),
+                cursorBrush = SolidColor(HelmColors.Amber),
+                modifier = Modifier.weight(1f)
+                    .background(HelmColors.Glass, RoundedCornerShape(6.dp))
+                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                decorationBox = { inner ->
+                    if (query.isEmpty()) Text("address or business…",
+                        color = HelmColors.TextDim, fontSize = 15.sp)
+                    inner()
+                },
+            )
+            Text("✕", fontSize = 18.sp, color = HelmColors.TextDim,
+                modifier = Modifier.clip(RoundedCornerShape(6.dp))
+                    .clickable { onClose() }.padding(horizontal = 8.dp, vertical = 4.dp))
+        }
+        if (!engineReady) Text("offline routing graph not installed",
+            fontSize = 12.sp, color = HelmColors.Amber)
+        val hint = when {
+            busy -> "searching…"
+            query.trim().length in 1..2 -> "keep typing…"
+            query.isNotBlank() && results.isEmpty() -> "no matches (or no internet)"
+            else -> null
+        }
+        hint?.let { Text(it, fontSize = 12.sp, color = HelmColors.TextDim) }
+        if (results.isNotEmpty()) Column(
+            Modifier.heightIn(max = 300.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            results.forEach { p ->
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                        .clickable { onPick(p) }.padding(horizontal = 8.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(p.name, color = HelmColors.Text, fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (p.label.isNotBlank()) Text(p.label, color = HelmColors.TextDim,
+                            fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    p.distanceM?.let {
+                        Text(tripDistStr(it), color = HelmColors.Cyan, fontSize = 12.sp,
+                            fontFamily = FontFamily.Monospace, maxLines = 1)
+                    }
                 }
             }
         }

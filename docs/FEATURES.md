@@ -180,8 +180,25 @@ audio muted below an adjustable threshold (default −20 dB) with 4 dB hysteresi
 so marginal signals don't chatter; SAME still decodes pre-gate. UI shows the
 threshold (±2 dB) and a live SIGNAL/muted dot. Verified on-device on FRS.
 
-**Open.** Stereo pilot + RDS; presets in DataStore; PL/DPL/DCS tone display;
-frequency drag-to-tune; per-service scan (hunt an active FRS/GMRS channel).
+**Tone decode.** `CtcssDetector` — Goertzel bank at the 50 EIA CTCSS tones over
+~0.2 s windows, dominant-bin detection; the decoded PL tone (e.g. "PL 118.8")
+shows in the squelch row. DCS (134.4-baud digital) is not decoded. Verified
+live on FRS.
+
+**Scan.** `SdrRepository.scan()` — FM does a full 88–108 sweep dropping station
+chips; channel bands hunt their plan and linger on any above-squelch channel
+(retunes + reads the run loop's RSSI — no second IQ reader). SCAN toggle.
+
+**Antenna/TX info.** ⓘ button at the waterfall's bottom-right pops a per-band
+panel: ideal antenna type + length (from `SdrBand.antenna`), a live λ/4·λ/2 for
+the tuned frequency, the tone-decode note, and TX status. Each band carries TX
+legality/licensing (`SdrBand.tx`) and there's a disabled 🎙 PTT scaffold in the
+header — **RX-only today**; flip `TX_RADIO` and wire PTT + a mic path when a
+transmit-capable SDR replaces the RTL dongle.
+
+**Open.** Stereo pilot + RDS; presets in DataStore; DCS decode; frequency
+drag-to-tune; TX chain (PTT keying, CTCSS encode, repeater offset/tone) once TX
+hardware lands.
 
 ---
 

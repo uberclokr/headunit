@@ -21,6 +21,8 @@ data class SdrBand(
     val channels: List<SdrChannel> = emptyList(),
     val continuous: Boolean = false,   // show fine-tune (+ scan for FM)
     val stepKhz: Int = 25,             // fine-tune step, continuous bands
+    val antenna: String = "",          // ideal antenna type + length (info panel)
+    val tx: String = "",               // TX legality/licensing (for a future TX radio)
 )
 
 /** US voice-comms + broadcast band catalog for the RTL-SDR pane. */
@@ -87,17 +89,40 @@ object SdrBands {
     ).map { SdrChannel(it.first, mhz(it.second)) }
 
     val ALL = listOf(
-        SdrBand("fm", "FM", Demod.WBFM, 98_100_000, continuous = true, stepKhz = 100),
-        SdrBand("am", "AM", Demod.AM, 1_000_000, continuous = true, stepKhz = 10),
-        SdrBand("air", "AIR", Demod.AM, 122_800_000, AIR, continuous = true, stepKhz = 25),
-        SdrBand("wx", "WX", Demod.NBFM, 162_550_000, WX),
-        SdrBand("frs", "FRS", Demod.NBFM, mhz(462.5625), FRS_1_22),
-        SdrBand("gmrs", "GMRS", Demod.NBFM, mhz(462.5500), FRS_1_22 + GMRS_RPT),
-        SdrBand("murs", "MURS", Demod.NBFM, mhz(151.820), MURS),
-        SdrBand("marine", "MARINE", Demod.NBFM, mhz(156.800), MARINE),
-        SdrBand("cb", "CB", Demod.AM, mhz(27.185), CB),
-        SdrBand("ham2m", "2M", Demod.NBFM, 146_520_000, HAM2M, continuous = true, stepKhz = 25),
-        SdrBand("ham70", "70CM", Demod.NBFM, 446_000_000, HAM70, continuous = true, stepKhz = 25),
+        SdrBand("fm", "FM", Demod.WBFM, 98_100_000, continuous = true, stepKhz = 100,
+            antenna = "Telescopic whip ~75 cm, or an FM dipole. λ/4 ≈ 75 cm @ 98 MHz.",
+            tx = ""),   // broadcast — receive only
+        SdrBand("am", "AM", Demod.AM, 1_000_000, continuous = true, stepKhz = 10,
+            antenna = "Ferrite-loop or a long random wire — a λ/4 whip is ~75 m here. " +
+                "Uses RTL2832 direct sampling (no LNA), so a bigger antenna helps.",
+            tx = ""),
+        SdrBand("air", "AIR", Demod.AM, 122_800_000, AIR, continuous = true, stepKhz = 25,
+            antenna = "1/4-wave VHF whip ~60 cm, or an air-band dipole. λ/4 ≈ 61 cm @ 123 MHz.",
+            tx = ""),   // aviation — RX (TX needs a certified aircraft radio + license)
+        SdrBand("wx", "WX", Demod.NBFM, 162_550_000, WX,
+            antenna = "1/4-wave whip ~46 cm; a 2 m / marine mobile antenna works. λ/4 ≈ 46 cm.",
+            tx = ""),   // NOAA weather — receive only by definition
+        SdrBand("frs", "FRS", Demod.NBFM, mhz(462.5625), FRS_1_22,
+            antenna = "1/4-wave UHF whip ~16 cm. λ/4 ≈ 16.2 cm @ 462 MHz.",
+            tx = "License-free. ≤2 W, fixed (non-removable) antenna by rule."),
+        SdrBand("gmrs", "GMRS", Demod.NBFM, mhz(462.5500), FRS_1_22 + GMRS_RPT,
+            antenna = "1/4-wave UHF whip ~16 cm; a 465 MHz mag-mount is ideal. λ/4 ≈ 16 cm.",
+            tx = "GMRS license (no exam). Up to 50 W + repeaters on RPT15–22."),
+        SdrBand("murs", "MURS", Demod.NBFM, mhz(151.820), MURS,
+            antenna = "1/4-wave VHF whip ~48 cm. λ/4 ≈ 49 cm @ 151 MHz.",
+            tx = "License-free. ≤2 W; external antenna allowed."),
+        SdrBand("marine", "MARINE", Demod.NBFM, mhz(156.800), MARINE,
+            antenna = "Marine VHF whip / 1/4-wave ~46 cm. λ/4 ≈ 46 cm @ 157 MHz.",
+            tx = "Marine VHF radio; ship-station rules. Ch16 = distress/calling."),
+        SdrBand("cb", "CB", Demod.AM, mhz(27.185), CB,
+            antenna = "Loaded/center-load whip — full λ/4 is ~2.75 m (102″ whip). λ/4 ≈ 275 cm @ 27 MHz.",
+            tx = "License-free. AM ≤4 W, SSB ≤12 W PEP."),
+        SdrBand("ham2m", "2M", Demod.NBFM, 146_520_000, HAM2M, continuous = true, stepKhz = 25,
+            antenna = "2 m mobile whip / 1/4-wave ~48 cm. λ/4 ≈ 48 cm @ 146 MHz.",
+            tx = "Amateur (Technician+) license required."),
+        SdrBand("ham70", "70CM", Demod.NBFM, 446_000_000, HAM70, continuous = true, stepKhz = 25,
+            antenna = "70 cm / dual-band mobile whip ~16 cm. λ/4 ≈ 16.8 cm @ 446 MHz.",
+            tx = "Amateur (Technician+) license required."),
     )
 
     val DEFAULT = ALL.first()

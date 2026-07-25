@@ -21,6 +21,7 @@ data class SdrState(
     val squelchOn: Boolean = true,          // gate audio on carrier power
     val squelchDb: Float = -20f,            // open threshold (RSSI dB)
     val squelchOpen: Boolean = true,        // live gate state (signal present)
+    val toneLabel: String? = null,          // detected CTCSS/PL tone (NBFM)
 ) {
     val band: SdrBand get() = SdrBands.byId(bandId)
 }
@@ -93,6 +94,7 @@ class SdrRepository(private val context: android.content.Context) {
         var nbfm = NbfmDemodulator(client.sampleRate)
         var am = AmDemodulator(client.sampleRate)
         var same = SameDecoder()
+        var ctcss = CtcssDetector()
         var bandId = _state.value.bandId
         val chunk = ByteArray(CHUNK_IQ * 2)
         val fftRow = FloatArray(FFT_SIZE)
@@ -107,6 +109,8 @@ class SdrRepository(private val context: android.content.Context) {
                 nbfm = NbfmDemodulator(client.sampleRate)
                 am = AmDemodulator(client.sampleRate)
                 same = SameDecoder()
+                ctcss = CtcssDetector()
+                if (_state.value.toneLabel != null) _state.value = _state.value.copy(toneLabel = null)
             }
             val audio = when (_state.value.band.demod) {
                 Demod.WBFM -> wbfm.process(chunk, CHUNK_IQ)
@@ -117,6 +121,9 @@ class SdrRepository(private val context: android.content.Context) {
                         _state.value = _state.value.copy(
                             wxAlert = alert, wxAlertAtMs = System.currentTimeMillis())
                     }
+                    // CTCSS/PL tone decode (only meaningful when a signal is up).
+                    val tone = if (sqOpen) ctcss.feed(a) else null
+                    if (tone != _state.value.toneLabel) _state.value = _state.value.copy(toneLabel = tone)
                 }
             }
             // Carrier squelch: gate audio on RSSI (computed every chunk for
@@ -182,6 +189,38 @@ class SdrRepository(private val context: android.content.Context) {
             f += 200_000
         }
         client.setFrequency(_state.value.freqHz)
+        _state.value = _state.value.copy(scanning = false)
+    }
+
+    /** Start/stop scanning: FM does a full-band sweep; channel bands hunt their
+     *  channel list, pausing on any active (above-squelch) channel. */
+    fun scan() {
+        if (_state.value.scanning) { stopScan(); return }
+        if (_state.value.band.channels.isEmpty()) scanFmBand() else scanChannels()
+    }
+
+    fun stopScan() { _state.value = _state.value.copy(scanning = false) }
+
+    /**
+     * Channel-hunt scanner. Steps the current band's channel plan; on a channel
+     * whose RSSI is above the squelch threshold it lingers (audio passes via the
+     * squelch) until the traffic clears, then resumes. Retunes through [tune] and
+     * reads the run-loop's published RSSI — no second reader on the IQ stream.
+     */
+    private fun scanChannels() = scope.launch {
+        if (!client.connected) return@launch
+        val chans = _state.value.band.channels
+        _state.value = _state.value.copy(scanning = true)
+        var i = 0
+        while (currentCoroutineContext().isActive && _state.value.scanning) {
+            tune(chans[i % chans.size].hz)
+            delay(140)                                   // dwell for RSSI to settle
+            if (_state.value.rssiDb > _state.value.squelchDb) {
+                while (currentCoroutineContext().isActive && _state.value.scanning &&
+                    _state.value.rssiDb > _state.value.squelchDb - 4f) delay(200)  // hold on traffic
+            }
+            i++
+        }
         _state.value = _state.value.copy(scanning = false)
     }
 

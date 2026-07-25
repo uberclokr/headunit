@@ -183,6 +183,59 @@ class AmDemodulator(inputRate: Int) {
 }
 
 /**
+ * CTCSS (PL tone) detector for NBFM audio. Runs a bank of Goertzel resonators
+ * at the 50 standard EIA tones (67.0–254.1 Hz) over ~0.2 s windows; if one bin
+ * dominates the bank (well above the mean, above a noise floor) that tone is
+ * reported. This is the sub-audible "privacy tone" a radio uses to open its
+ * own squelch — decoding it tells you which tone a group is on. DCS (the
+ * digital 134.4-baud variant) is NOT decoded here; a strong low-frequency
+ * component that matches no CTCSS tone is flagged as "DCS?" instead.
+ *
+ * Thresholds want on-air tuning; they're set conservatively to avoid voice
+ * harmonics false-triggering.
+ */
+class CtcssDetector(sampleRate: Int = WbfmDemodulator.AUDIO_RATE) {
+    private val tones = floatArrayOf(
+        67.0f, 69.3f, 71.9f, 74.4f, 77.0f, 79.7f, 82.5f, 85.4f, 88.5f, 91.5f,
+        94.8f, 97.4f, 100.0f, 103.5f, 107.2f, 110.9f, 114.8f, 118.8f, 123.0f, 127.3f,
+        131.8f, 136.5f, 141.3f, 146.2f, 151.4f, 156.7f, 159.8f, 162.2f, 165.5f, 167.9f,
+        171.3f, 173.8f, 177.3f, 179.9f, 183.5f, 186.2f, 189.9f, 192.8f, 196.6f, 199.5f,
+        203.5f, 206.5f, 210.7f, 218.1f, 225.7f, 229.1f, 233.6f, 241.8f, 250.3f, 254.1f,
+    )
+    private val coeff = FloatArray(tones.size) { 2f * cos(2.0 * PI * tones[it] / sampleRate).toFloat() }
+    private val s1 = FloatArray(tones.size)
+    private val s2 = FloatArray(tones.size)
+    private val window = sampleRate / 5      // ~0.2 s
+    private var n = 0
+    private var last: String? = null
+
+    /** Feed demodulated audio; returns the current tone label (e.g. "100.0") or null. */
+    fun feed(audio: ShortArray): String? {
+        for (x in audio) {
+            val v = x / 32768f
+            for (k in tones.indices) {
+                val s0 = v + coeff[k] * s1[k] - s2[k]
+                s2[k] = s1[k]; s1[k] = s0
+            }
+            if (++n >= window) {
+                var maxP = 0f; var maxK = -1; var sum = 0f
+                for (k in tones.indices) {
+                    val p = s1[k] * s1[k] + s2[k] * s2[k] - coeff[k] * s1[k] * s2[k]
+                    sum += p
+                    if (p > maxP) { maxP = p; maxK = k }
+                    s1[k] = 0f; s2[k] = 0f
+                }
+                n = 0
+                val avg = sum / tones.size
+                last = if (maxK >= 0 && maxP > avg * 10f && maxP > 5e-4f)
+                    "%.1f".format(tones[maxK]) else null
+            }
+        }
+        return last
+    }
+}
+
+/**
  * SAME/EAS decoder for NOAA weather radio audio (32 kHz mono).
  *
  * Two detectors, because AFSK decode off a crude NBFM chain is fragile:

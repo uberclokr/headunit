@@ -18,6 +18,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.xterra.helm.HelmApp
+import com.xterra.helm.sdr.SdrBand
 import com.xterra.helm.sdr.SdrBands
 import com.xterra.helm.ui.theme.HelmColors
 
@@ -35,6 +36,7 @@ fun SdrWidget() {
     val state by repo.state.collectAsState()
     val row by repo.spectrum.collectAsState()
     val band = state.band
+    var showInfo by remember { mutableStateOf(false) }
 
     val history = remember { ArrayDeque<FloatArray>() }
     LaunchedEffect(row) {
@@ -51,6 +53,12 @@ fun SdrWidget() {
                     Chip(b.label, active = state.bandId == b.id) { repo.setBand(b) }
                 }
             }
+            Spacer(Modifier.width(8.dp))
+            // TX scaffold: RX-only hardware today. Present so the layout + band
+            // TX metadata are ready for a transmit-capable SDR; tapping explains
+            // the current status + this band's TX rules. Flip TX_RADIO when the
+            // TX hardware + a mic path land, then wire PTT to key the radio.
+            Chip("🎙 PTT", active = false, disabled = !TX_RADIO) { showInfo = true }
             Spacer(Modifier.width(8.dp))
             if (state.running) {
                 Chip("■ STOP", active = false, danger = true) { repo.stop() }
@@ -86,35 +94,41 @@ fun SdrWidget() {
         }
         Spacer(Modifier.height(8.dp))
 
-        // Spectrum + waterfall
-        Canvas(Modifier.fillMaxWidth().weight(1f)
+        // Spectrum + waterfall, with an antenna/TX info button bottom-right.
+        Box(Modifier.fillMaxWidth().weight(1f)
             .clip(RoundedCornerShape(10.dp)).background(HelmColors.Glass)) {
-            val n = row.size
-            if (n == 0) return@Canvas
-            val wStep = size.width / n
-            val traceH = size.height * 0.35f
-            var prev = Offset(0f, traceH)
-            for (i in 0 until n) {
-                val v = ((row[i] + 60f) / 60f).coerceIn(0f, 1f)
-                val pt = Offset(i * wStep, traceH * (1f - v))
-                drawLine(HelmColors.Cyan, prev, pt, strokeWidth = 1.5f)
-                prev = pt
-            }
-            // center-tune reference line
-            drawLine(HelmColors.AmberDim,
-                Offset(size.width / 2, 0f), Offset(size.width / 2, traceH),
-                strokeWidth = 1f)
-            val rows = history.toList()
-            val rh = (size.height - traceH) / 90f
-            rows.forEachIndexed { r, arr ->
-                val y = traceH + r * rh
-                for (i in 0 until n step 2) {
-                    val v = ((arr[i] + 60f) / 60f).coerceIn(0f, 1f)
-                    drawRect(Color(v, v * 0.62f, 0.18f * (1 - v), 1f),
-                        topLeft = Offset(i * wStep, y),
-                        size = androidx.compose.ui.geometry.Size(wStep * 2, rh + 1f))
+            Canvas(Modifier.fillMaxSize()) {
+                val n = row.size
+                if (n == 0) return@Canvas
+                val wStep = size.width / n
+                val traceH = size.height * 0.35f
+                var prev = Offset(0f, traceH)
+                for (i in 0 until n) {
+                    val v = ((row[i] + 60f) / 60f).coerceIn(0f, 1f)
+                    val pt = Offset(i * wStep, traceH * (1f - v))
+                    drawLine(HelmColors.Cyan, prev, pt, strokeWidth = 1.5f)
+                    prev = pt
+                }
+                // center-tune reference line
+                drawLine(HelmColors.AmberDim,
+                    Offset(size.width / 2, 0f), Offset(size.width / 2, traceH),
+                    strokeWidth = 1f)
+                val rows = history.toList()
+                val rh = (size.height - traceH) / 90f
+                rows.forEachIndexed { r, arr ->
+                    val y = traceH + r * rh
+                    for (i in 0 until n step 2) {
+                        val v = ((arr[i] + 60f) / 60f).coerceIn(0f, 1f)
+                        drawRect(Color(v, v * 0.62f, 0.18f * (1 - v), 1f),
+                            topLeft = Offset(i * wStep, y),
+                            size = androidx.compose.ui.geometry.Size(wStep * 2, rh + 1f))
+                    }
                 }
             }
+            Chip("ⓘ", active = showInfo,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp)) { showInfo = !showInfo }
+            if (showInfo) BandInfoPanel(band, state.freqHz,
+                Modifier.align(Alignment.BottomEnd).padding(end = 8.dp, bottom = 46.dp)) { showInfo = false }
         }
         Spacer(Modifier.height(8.dp))
 
@@ -137,6 +151,10 @@ fun SdrWidget() {
                     state.squelchOpen -> HelmColors.Ok
                     else -> HelmColors.TextDim
                 })
+            // Decoded CTCSS/PL tone (NBFM), when one is present on the signal.
+            state.toneLabel?.let {
+                Text("PL $it", style = MaterialTheme.typography.labelSmall, color = HelmColors.Cyan)
+            }
         }
         Spacer(Modifier.height(8.dp))
 
@@ -173,20 +191,23 @@ fun SdrWidget() {
             Spacer(Modifier.height(8.dp))
         }
 
-        // Continuous-tuning controls (broadcast/aviation/ham). Step sizes scale
-        // with the band; FM adds a scan, all get auto-tune drift correction.
-        if (band.continuous) {
+        // Controls: continuous bands get band-scaled tune steps + drift auto-tune;
+        // FM (station sweep) and any channel band (channel hunt) get SCAN.
+        val canScan = band.id == "fm" || band.channels.isNotEmpty()
+        if (band.continuous || canScan) {
             val s = band.stepKhz
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Chip("−${s * 4}k", false) { repo.step(-s * 4) }
-                Chip("−${s}k", false) { repo.step(-s) }
-                Chip("+${s}k", false) { repo.step(s) }
-                Chip("+${s * 4}k", false) { repo.step(s * 4) }
-                Spacer(Modifier.weight(1f))
-                if (band.id == "fm") Chip(if (state.scanning) "SCANNING…" else "SCAN", state.scanning) {
-                    if (!state.scanning) repo.scanFmBand()
+                if (band.continuous) {
+                    Chip("−${s * 4}k", false) { repo.step(-s * 4) }
+                    Chip("−${s}k", false) { repo.step(-s) }
+                    Chip("+${s}k", false) { repo.step(s) }
+                    Chip("+${s * 4}k", false) { repo.step(s * 4) }
                 }
-                Chip(if (state.autoTuning) "TUNING…" else "◎ AUTO", state.autoTuning) {
+                Spacer(Modifier.weight(1f))
+                if (canScan) Chip(if (state.scanning) "SCANNING…" else "SCAN", state.scanning) {
+                    repo.scan()
+                }
+                if (band.continuous) Chip(if (state.autoTuning) "TUNING…" else "◎ AUTO", state.autoTuning) {
                     if (!state.autoTuning) repo.autoTune()
                 }
             }
@@ -194,12 +215,59 @@ fun SdrWidget() {
     }
 }
 
+/** TX-capable radio present? RX-only today; flip when the TX SDR + mic land. */
+private const val TX_RADIO = false
+
+/**
+ * Antenna + TX info for the current band, popped from the ⓘ button. Shows the
+ * ideal antenna type/length, a live λ/4·λ/2 for the tuned frequency (VHF/UHF),
+ * and — for the eventual transmit-capable radio — this band's TX legality and
+ * whether TX hardware is present.
+ */
 @Composable
-private fun Chip(text: String, active: Boolean, danger: Boolean = false, onClick: () -> Unit) {
-    val fg = when { danger -> HelmColors.Alert; active -> HelmColors.Amber; else -> HelmColors.Text }
+private fun BandInfoPanel(band: SdrBand, freqHz: Long, modifier: Modifier, onClose: () -> Unit) {
+    val fMHz = freqHz / 1e6
+    Column(
+        modifier.widthIn(max = 360.dp).clip(RoundedCornerShape(10.dp))
+            .background(HelmColors.Panel.copy(alpha = 0.97f)).padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("${band.label} · ANTENNA", style = MaterialTheme.typography.titleSmall,
+                color = HelmColors.Amber, modifier = Modifier.weight(1f))
+            Text("✕", style = MaterialTheme.typography.labelSmall, color = HelmColors.TextDim,
+                modifier = Modifier.clip(RoundedCornerShape(6.dp))
+                    .clickable { onClose() }.padding(horizontal = 8.dp, vertical = 2.dp))
+        }
+        Text(band.antenna, style = MaterialTheme.typography.bodyMedium, color = HelmColors.Text)
+        if (fMHz >= 20) Text(
+            "λ/4 ≈ %.0f cm · λ/2 ≈ %.0f cm @ %.3f MHz".format(7500 / fMHz, 15000 / fMHz, fMHz),
+            style = MaterialTheme.typography.labelSmall, color = HelmColors.Cyan)
+        if (band.demod == com.xterra.helm.sdr.Demod.NBFM) Text(
+            "Tones: CTCSS/PL decoded live; DCS not decoded.",
+            style = MaterialTheme.typography.labelSmall, color = HelmColors.TextDim)
+        Text(
+            "TX: " + if (!TX_RADIO) "no transmit-capable radio installed (RX only). "
+            else "" + band.tx.ifBlank { "receive-only band." },
+            style = MaterialTheme.typography.labelSmall,
+            color = if (TX_RADIO && band.tx.isNotBlank()) HelmColors.Text else HelmColors.TextDim)
+        if (band.tx.isNotBlank()) Text("Band rule: ${band.tx}",
+            style = MaterialTheme.typography.labelSmall, color = HelmColors.TextDim)
+    }
+}
+
+@Composable
+private fun Chip(
+    text: String, active: Boolean, danger: Boolean = false, disabled: Boolean = false,
+    modifier: Modifier = Modifier, onClick: () -> Unit,
+) {
+    val fg = when {
+        disabled -> HelmColors.TextDim; danger -> HelmColors.Alert
+        active -> HelmColors.Amber; else -> HelmColors.Text
+    }
     val edge = when { danger -> HelmColors.Alert; active -> HelmColors.Amber; else -> HelmColors.PanelEdge }
     Box(
-        Modifier.clip(RoundedCornerShape(9.dp))
+        modifier.clip(RoundedCornerShape(9.dp))
             .background(if (active) HelmColors.AmberDim.copy(alpha = 0.4f) else HelmColors.Panel)
             .border(1.dp, edge, RoundedCornerShape(9.dp))
             .clickable { onClick() }

@@ -57,6 +57,10 @@ data class HelmSettings(
     // locally (NetRepository); these just supply the denominator + reset date.
     val starlinkCapGb: Float = 100f,
     val starlinkAnchorDay: Int = 24,
+    // VNC guard: auto-disconnect droidVNC-NG clients older than [vncTimeoutMin]
+    // minutes so a forgotten remote-screen session can't drain Starlink 24/7.
+    val vncGuard: Boolean = true,
+    val vncTimeoutMin: Int = 5,
 )
 
 private val Context.dataStore by preferencesDataStore("helm_settings")
@@ -95,6 +99,8 @@ class SettingsRepository(context: Context) {
             tiltInvertPitch = p[TILT_INV_PITCH] ?: HelmSettings().tiltInvertPitch,
             starlinkCapGb = p[SL_CAP_GB] ?: HelmSettings().starlinkCapGb,
             starlinkAnchorDay = p[SL_ANCHOR] ?: HelmSettings().starlinkAnchorDay,
+            vncGuard = p[VNC_GUARD] ?: HelmSettings().vncGuard,
+            vncTimeoutMin = p[VNC_TIMEOUT] ?: HelmSettings().vncTimeoutMin,
         )
     }
 
@@ -148,6 +154,15 @@ class SettingsRepository(context: Context) {
         }
     }
 
+    fun setVncGuard(enabled: Boolean, timeoutMin: Int) {
+        scope.launch {
+            ds.edit {
+                it[VNC_GUARD] = enabled
+                it[VNC_TIMEOUT] = timeoutMin.coerceIn(1, 120)
+            }
+        }
+    }
+
     fun setPaneLayout(left: String, right: String, split: Float) {
         scope.launch {
             ds.edit { it[PANE_L] = left; it[PANE_R] = right; it[PANE_SPLIT] = split }
@@ -178,6 +193,8 @@ class SettingsRepository(context: Context) {
         private val TILT_INV_PITCH = booleanPreferencesKey("tilt_inv_pitch")
         private val SL_CAP_GB = floatPreferencesKey("starlink_cap_gb")
         private val SL_ANCHOR = intPreferencesKey("starlink_anchor_day")
+        private val VNC_GUARD = booleanPreferencesKey("vnc_guard")
+        private val VNC_TIMEOUT = intPreferencesKey("vnc_timeout_min")
         private val ZOOMS = listOf(
             doublePreferencesKey("nav_zoom_1"),
             doublePreferencesKey("nav_zoom_2"),

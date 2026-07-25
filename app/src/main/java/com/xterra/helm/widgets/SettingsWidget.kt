@@ -168,7 +168,57 @@ fun SettingsWidget() {
         OfflineCacheSection()
 
         Spacer(Modifier.height(10.dp))
+        VncSection()
+
+        Spacer(Modifier.height(10.dp))
         CompanionSection()
+    }
+}
+
+/**
+ * Remote-access (VNC) manager. droidVNC-NG is a separate app that mirrors the
+ * screen; left connected it streamed the animated dashboard over Starlink 24/7
+ * (~59 GB once). This surfaces its live clients + a hard session cap (Helm's
+ * root watchdog kills any VNC connection older than the cap) plus manual
+ * disconnect / stop / start.
+ */
+@Composable
+private fun VncSection() {
+    val vnc by HelmApp.instance.vnc.state.collectAsState()
+    val s by HelmApp.instance.settings.state.collectAsState()
+    val settings = HelmApp.instance.settings
+
+    Text("REMOTE ACCESS  (VNC)", style = MaterialTheme.typography.titleMedium, color = HelmColors.Amber)
+    Text(
+        if (vnc.serverUp) "server ON · ${vnc.conns.size} client${if (vnc.conns.size == 1) "" else "s"} connected"
+        else "server off",
+        style = MaterialTheme.typography.bodyMedium,
+        color = if (vnc.serverUp) HelmColors.Ok else HelmColors.TextDim)
+    vnc.conns.forEach { c ->
+        Text("• ${c.peer} · ${c.ageSec / 60}m ${c.ageSec % 60}s",
+            style = MaterialTheme.typography.labelSmall, color = HelmColors.TextDim)
+    }
+
+    // Auto-disconnect cap — a forgotten viewer can't stream past this.
+    Row(verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Btn(if (s.vncGuard) "AUTO-CUT ON" else "AUTO-CUT OFF", primary = s.vncGuard) {
+            settings.setVncGuard(!s.vncGuard, s.vncTimeoutMin)
+        }
+        Btn("−") { settings.setVncGuard(s.vncGuard, s.vncTimeoutMin - 1) }
+        Text("${s.vncTimeoutMin} min cap",
+            style = MaterialTheme.typography.bodyMedium, color = HelmColors.Cyan)
+        Btn("+") { settings.setVncGuard(s.vncGuard, s.vncTimeoutMin + 1) }
+    }
+
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Btn("STOP NOW", primary = true) { HelmApp.instance.vnc.stopServer() }
+        Btn("START") { HelmApp.instance.vnc.startServer() }
+    }
+    Text("STOP cuts the viewer and leaves VNC off until START — no per-client kill on this ROM.",
+        style = MaterialTheme.typography.labelSmall, color = HelmColors.TextDim)
+    vnc.lastAction?.let {
+        Text(it, style = MaterialTheme.typography.labelSmall, color = HelmColors.Cyan)
     }
 }
 

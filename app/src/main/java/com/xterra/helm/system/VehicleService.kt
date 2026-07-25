@@ -178,6 +178,7 @@ class VehicleService : LifecycleService() {
         HelmApp.instance.net.start()
         HelmApp.instance.lora.start()
         HelmApp.instance.nav.start()
+        HelmApp.instance.vnc.start()   // caps stale VNC sessions (Starlink guard)
         // Companion-app back end: status API + camera relay, served over WG.
         ApiServer.start()
         RtspRelay.start()

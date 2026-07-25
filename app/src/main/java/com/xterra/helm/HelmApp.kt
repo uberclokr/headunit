@@ -42,6 +42,7 @@ class HelmApp : Application() {
     lateinit var lora: com.xterra.helm.lora.LoraRepository
         private set
     lateinit var nav: com.xterra.helm.nav.route.NavRepository
+    lateinit var vnc: com.xterra.helm.system.VncManager
         private set
 
     override fun onCreate() {
@@ -62,6 +63,7 @@ class HelmApp : Application() {
         tilt = com.xterra.helm.system.TiltRepository(this, settings)
         lora = com.xterra.helm.lora.LoraRepository(this)
         nav = com.xterra.helm.nav.route.NavRepository(this)
+        vnc = com.xterra.helm.system.VncManager()
         // Kick the always-on vehicle service (CAN poll + reverse watch).
         startForegroundService(Intent(this, VehicleService::class.java))
     }

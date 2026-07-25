@@ -82,6 +82,7 @@ fun NavMap() {
     val loraCfg by HelmApp.instance.lora.config.collectAsState()
     // Offline region-download progress text (region management lives in Settings).
     var cacheMsg by remember { mutableStateOf<String?>(null) }
+    var cachePanelOpen by remember { mutableStateOf(false) }
     // Address / business search (online geocode → offline route).
     var searchOpen by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
@@ -145,16 +146,21 @@ fun NavMap() {
     }
 
     // MapLibre must be initialized before any MapView is created. Keyless.
-    // Enlarge the ambient tile cache to 1 GB so USGS/terrain tiles for
-    // everywhere you've driven stay available when Starlink drops — automatic
-    // LRU caching, no explicit download needed for areas already viewed.
+    // Ambient tile cache: everywhere you've driven, kept as an automatic LRU so
+    // it survives a Starlink drop with no explicit download. Held to 512 MB —
+    // /data is small (~2.5 GB free) and an explicit regional download (below)
+    // competes for that space. Also lift MapLibre's default 6 000-tile cap on
+    // *explicit* regions to 300 k, or a real region (Western Oregon at z13 is
+    // ~13 k tiles) aborts partway as "tile count limit exceeded".
     remember {
         MapLibre.getInstance(ctx)
-        OfflineManager.getInstance(ctx).setMaximumAmbientCacheSize(
-            1_073_741_824L, object : OfflineManager.FileSourceCallback {
+        OfflineManager.getInstance(ctx).apply {
+            setMaximumAmbientCacheSize(536_870_912L, object : OfflineManager.FileSourceCallback {
                 override fun onSuccess() {}
                 override fun onError(message: String) {}
             })
+            setOfflineMapboxTileCountLimit(300_000L)
+        }
         true
     }
     val mapView = remember { MapView(ctx).apply { onCreate(null) } }
@@ -264,14 +270,21 @@ fun NavMap() {
             }
             val n = pois.features()?.size ?: 0
             LayerChip(if (n == 0) "⌖ long-press to drop WP" else "⌖ $n WP", active = false) {}
-            // Download the current view for offline use (frame the area first).
-            // Region/graph management lives in the Settings pane.
-            LayerChip(cacheMsg ?: "⤓ CACHE THIS VIEW", active = cacheMsg != null) {
-                if (cacheMsg == null) mapRef.value?.let { m ->
-                    downloadRegion(ctx, m, base) { cacheMsg = it }
-                }
+            // Cache the framed area offline — opens a detail/size chooser (frame
+            // the area first by zooming out). Region/graph management: Settings.
+            LayerChip(cacheMsg ?: "⤓ CACHE THIS VIEW", active = cacheMsg != null || cachePanelOpen) {
+                cacheMsg = null; cachePanelOpen = true
             }
         }
+
+        if (cachePanelOpen) CachePanel(
+            map = mapRef.value, base = base,
+            onStart = { b, minZ, maxZ ->
+                downloadRegion(ctx, base, b, minZ, maxZ) { cacheMsg = it }
+                cachePanelOpen = false
+            },
+            onClose = { cachePanelOpen = false },
+        )
 
         if (searchOpen) SearchPanel(
             query = query, onQuery = { query = it },
@@ -487,53 +500,82 @@ private const val LORA_SRC = "helm-lora"
 private const val LORA_LAYER = "helm-lora-dots"
 
 /**
- * Download the current viewport for offline use. Frame the area, tap the
- * chip: the visible bounds are cached from the current zoom up ~3 levels
- * (capped at 15) so it's usable when Starlink drops. Uses a file:// copy of
- * the active style since the offline downloader needs a style URL, not inline
- * JSON. Progress arrives on a background thread → [onProgress] (Compose state
- * writes are thread-safe).
+ * Flat bounds for the framed area, from the camera center — visibleRegion is
+ * unreliable under 55° tilt (extends to the horizon → 0 tiles enumerated).
+ * Half-span shrinks with zoom (so zooming out frames a larger area to cache),
+ * lon widened for the landscape aspect.
  */
-private fun downloadRegion(
-    ctx: Context, map: MapLibreMap, base: MapStyles.Base, onProgress: (String?) -> Unit,
-) {
-    // Build a flat bounds from the camera center — visibleRegion.latLngBounds
-    // is unreliable under 55° tilt (extends to the horizon → the offline
-    // enumerator finds 0 tiles). Half-span shrinks with zoom; lon widened for
-    // the landscape aspect.
-    val center = map.cameraPosition.target ?: return
-    val z = map.cameraPosition.zoom
-    val d = 180.0 / Math.pow(2.0, z)
-    val bounds = LatLngBounds.Builder()
+private fun viewBounds(map: MapLibreMap): LatLngBounds? {
+    val center = map.cameraPosition.target ?: return null
+    val d = 180.0 / Math.pow(2.0, map.cameraPosition.zoom)
+    return LatLngBounds.Builder()
         .include(LatLng(center.latitude + d, center.longitude + d * 1.7))
         .include(LatLng(center.latitude - d, center.longitude - d * 1.7))
         .build()
-    val minZ = z.coerceIn(1.0, 15.0)
-    val maxZ = (z + 3.0).coerceAtMost(15.0)
-    // Serve the raster-only style over loopback HTTP — the offline downloader
-    // won't load a file:// style (stalls at req=1/done=0).
+}
+
+private fun xTile(lon: Double, z: Int): Int =
+    Math.floor((lon + 180.0) / 360.0 * (1 shl z)).toInt()
+
+private fun yTile(lat: Double, z: Int): Int =
+    Math.floor((1.0 - kotlin.math.asinh(Math.tan(Math.toRadians(lat))) / Math.PI) / 2.0 * (1 shl z)).toInt()
+
+/** XYZ tile count covering [b] over z=[minZ]..[maxZ] inclusive (download size proxy). */
+private fun estimateTiles(b: LatLngBounds, minZ: Int, maxZ: Int): Long {
+    var total = 0L
+    for (z in minZ..maxZ) {
+        val nx = (xTile(b.longitudeEast, z) - xTile(b.longitudeWest, z) + 1).coerceAtLeast(1)
+        val ny = (yTile(b.latitudeSouth, z) - yTile(b.latitudeNorth, z) + 1).coerceAtLeast(1)
+        total += nx.toLong() * ny.toLong()
+    }
+    return total
+}
+
+/** Rough bytes for [tiles] USGS topo rasters (~18 KB avg — measured on-device). */
+private fun estBytes(tiles: Long): Long = tiles * 18L * 1024L
+
+/**
+ * Tiles MapLibre actually downloads for map-zoom [minMapZ]..[maxMapZ] over [b].
+ * The USGS source is 256 px; in MapLibre's 512 px tile grid that means source
+ * tiles are fetched one zoom above the map zoom, so a "z6–13" region really
+ * pulls source z7–14 (~4× the naive count). Model that shift so the size
+ * estimate matches reality (measured: a z6–13 Western-Oregon region ≈ 50 k
+ * tiles / ~870 MB, not the ~13 k a naive z6–13 count predicts).
+ */
+private fun estimateRegionTiles(b: LatLngBounds, minMapZ: Int, maxMapZ: Int): Long =
+    estimateTiles(b, minMapZ + 1, (maxMapZ + 1).coerceAtMost(16))
+
+/**
+ * Download an explicit [bounds] across z=[minZ]..[maxZ] for offline use — the
+ * zoom range is chosen by the caller (detail selector), NOT tied to the camera,
+ * so a large framed area can be cached at street zoom. Uses the raster-only
+ * style served over loopback HTTP (the offline downloader won't load a file://
+ * style). Progress arrives on a background thread → [onProgress].
+ */
+private fun downloadRegion(
+    ctx: Context, base: MapStyles.Base, bounds: LatLngBounds, minZ: Int, maxZ: Int,
+    onProgress: (String?) -> Unit,
+) {
     val styleUrl = StyleServer.serve(MapStyles.offlineStyle(base))
     val def = OfflineTilePyramidRegionDefinition(
-        styleUrl, bounds, minZ, maxZ, ctx.resources.displayMetrics.density)
-    // Human-readable name so the REGIONS manager can tell downloads apart.
-    val regionName = "%s %.3f,%.3f z%d-%d · %s".format(
-        base.label, center.latitude, center.longitude, minZ.toInt(), maxZ.toInt(),
-        java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
-            .format(java.util.Date()))
-    onProgress("caching 0%")
+        styleUrl, bounds, minZ.toDouble(), maxZ.toDouble(), ctx.resources.displayMetrics.density)
+    val c = bounds.center
+    val regionName = "%s z%d-%d · %.2f,%.2f · %s".format(
+        base.label, minZ, maxZ, c.latitude, c.longitude,
+        java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date()))
+    onProgress("starting…")
     OfflineManager.getInstance(ctx).createOfflineRegion(
         def, """{"name":"$regionName"}""".toByteArray(),
         object : OfflineManager.CreateOfflineRegionCallback {
             override fun onCreate(region: OfflineRegion) {
                 region.setObserver(object : OfflineRegion.OfflineRegionObserver {
                     override fun onStatusChanged(st: OfflineRegionStatus) {
+                        val mb = st.completedResourceSize / 1_048_576
                         if (st.isComplete) android.util.Log.i("Helm",
-                            "OFFLINE done: ${st.completedResourceCount} tiles, " +
-                            "${st.completedResourceSize / 1024} KB")
+                            "OFFLINE done: ${st.completedResourceCount} tiles, $mb MB")
                         onProgress(
-                            if (st.isComplete)
-                                "✓ ${st.completedResourceCount} tiles · ${st.completedResourceSize / 1_048_576} MB"
-                            else "caching ${st.completedResourceCount} tiles…")
+                            if (st.isComplete) "✓ ${st.completedResourceCount} tiles · $mb MB"
+                            else "${st.completedResourceCount} tiles · $mb MB…")
                     }
                     override fun onError(e: OfflineRegionError) {
                         android.util.Log.w("Helm", "OFFLINE err ${e.reason}: ${e.message}")
@@ -567,6 +609,74 @@ private fun enableLocation(ctx: Context, map: MapLibreMap, style: Style) {
 private fun hasLocationPermission(ctx: Context) =
     ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.ACCESS_FINE_LOCATION) ==
         PackageManager.PERMISSION_GRANTED
+
+/**
+ * Offline-cache chooser for the framed map area. Estimates tiles + size for a
+ * few detail levels (zoom ceilings) over the current view bounds and shows
+ * each against the free space on /data, so a big region can be cached at street
+ * zoom without silently blowing the disk or the tile-count limit. Picking a
+ * level that fits starts the download; over-budget levels are shown but locked.
+ */
+@Composable
+private fun BoxScope.CachePanel(
+    map: MapLibreMap?, base: MapStyles.Base,
+    onStart: (LatLngBounds, Int, Int) -> Unit, onClose: () -> Unit,
+) {
+    val ctx = LocalContext.current
+    val bounds = remember(map) { map?.let { viewBounds(it) } }
+    val freeBytes = remember { android.os.StatFs(ctx.filesDir.path).availableBytes }
+    Column(
+        Modifier.align(Alignment.TopStart).padding(10.dp)
+            .widthIn(min = 300.dp, max = 400.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(HelmColors.Panel.copy(alpha = 0.96f))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("CACHE FRAMED AREA", style = MaterialTheme.typography.titleSmall,
+                color = HelmColors.Amber, modifier = Modifier.weight(1f))
+            Text("✕", color = HelmColors.TextDim,
+                modifier = Modifier.clip(RoundedCornerShape(6.dp))
+                    .clickable { onClose() }.padding(horizontal = 8.dp, vertical = 2.dp))
+        }
+        Text("free on /data ${freeBytes / 1_048_576} MB · zoom out to frame a wider area",
+            style = MaterialTheme.typography.labelSmall, color = HelmColors.TextDim)
+        if (bounds == null) {
+            Text("map not ready", style = MaterialTheme.typography.bodyMedium, color = HelmColors.TextDim)
+        } else {
+            // z6 overview → the chosen ceiling. Any tier is downloadable; a tier
+            // larger than current free space is flagged (add external storage /
+            // clear caches) but NOT blocked — the disk is expandable.
+            listOf(Triple("Roads & towns", 12, "highways, town labels"),
+                   Triple("Streets", 13, "full street network"),
+                   Triple("Full detail", 14, "every street, driveable"),
+                   Triple("Max detail", 15, "building level")).forEach { (label, maxZ, note) ->
+                val tiles = estimateRegionTiles(bounds, 6, maxZ)
+                val bytes = estBytes(tiles)
+                val overFree = bytes > freeBytes * 9 / 10
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                        .background(HelmColors.Glass, RoundedCornerShape(8.dp))
+                        .clickable { onStart(bounds, 6, maxZ) }
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("$label · z6–$maxZ ($note)",
+                            style = MaterialTheme.typography.bodyMedium, color = HelmColors.Text)
+                        Text("~%,d tiles · ~%,d MB".format(tiles, bytes / 1_048_576) +
+                                if (overFree) " · exceeds free space" else "",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (overFree) HelmColors.Amber else HelmColors.TextDim)
+                    }
+                    Text("▶", style = MaterialTheme.typography.bodyMedium, color = HelmColors.Amber)
+                }
+            }
+        }
+    }
+}
 
 
 @OptIn(ExperimentalFoundationApi::class)

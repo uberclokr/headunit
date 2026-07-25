@@ -115,9 +115,23 @@ Management lives in the **Settings** pane ("OFFLINE MAPS & NAV"), covering both
 offline-cache classes in one place:
 
 - **Map tiles** — MapLibre offline regions listed with tile counts + size and
-  per-region delete, plus a clear for the 1 GB ambient LRU cache (everywhere
-  already viewed). Regions are *captured* on the nav pane's single **CACHE THIS
-  VIEW** button — it needs a framed viewport, so it stays on the map.
+  per-region delete, plus a clear for the ambient LRU cache (512 MB; everywhere
+  already viewed). Regions are *captured* on the nav pane's **CACHE THIS VIEW**
+  button — it needs a framed viewport, so it stays on the map. Tapping it opens
+  a **CACHE FRAMED AREA** chooser: frame the area (zoom out for a wider region),
+  pick a detail ceiling (Roads z12 / Streets z13 / Full detail z14 / Max z15),
+  and it caches the framed bbox across z6→ceiling. Each tier shows a live
+  tile/size estimate against free space (advisory, not a hard block — the disk
+  is expandable with external storage).
+
+  Two things had to be fixed for a real region to cache (both in `NavMap.kt`):
+  the old button coupled area to zoom (framing wide forced a coarse ceiling)
+  **and** MapLibre's default 6 000-tile-per-region limit aborted anything
+  larger — raised to 300 k via `setOfflineMapboxTileCountLimit`. Sizing note:
+  the USGS source is 256 px, so in MapLibre's 512 px grid it fetches source
+  tiles one zoom **above** the map zoom — a "z6–13" region really pulls source
+  z7–14 (~4× a naive count). The estimate models that shift; measured on-device,
+  **all of Western Oregon at z6–13 = 47,151 tiles / 831 MB** (~18 KB/tile).
 - **Navigation** — the routing graph: size, loaded state, and delete (tears the
   engine down; routing is unavailable until re-provisioned per above).
 

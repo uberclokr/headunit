@@ -92,6 +92,55 @@ class VehicleService : LifecycleService() {
         }
     }
 
+    // Offline map-tile region download for a bbox (default = Western Oregon,
+    // z6-13). Validates the raised tile-count limit and pre-caches a region
+    // without needing to frame it on the map:
+    //   adb shell am broadcast -a com.xterra.helm.NAV_CACHE --ei z 13
+    //   ...optional --ef n 46.3 --ef s 42.0 --ef e -121.8 --ef w -124.6
+    private val navCache = object : BroadcastReceiver() {
+        override fun onReceive(c: Context?, i: Intent?) {
+            val ctx = applicationContext
+            val n = i?.getFloatExtra("n", 46.3f)?.toDouble() ?: 46.3
+            val s = i?.getFloatExtra("s", 42.0f)?.toDouble() ?: 42.0
+            val e = i?.getFloatExtra("e", -121.8f)?.toDouble() ?: -121.8
+            val w = i?.getFloatExtra("w", -124.6f)?.toDouble() ?: -124.6
+            val maxZ = (i?.getIntExtra("z", 13) ?: 13).toDouble()
+            org.maplibre.android.MapLibre.getInstance(ctx)
+            val mgr = org.maplibre.android.offline.OfflineManager.getInstance(ctx)
+            mgr.setOfflineMapboxTileCountLimit(300_000L)
+            val bounds = org.maplibre.android.geometry.LatLngBounds.Builder()
+                .include(org.maplibre.android.geometry.LatLng(n, e))
+                .include(org.maplibre.android.geometry.LatLng(s, w)).build()
+            val styleUrl = com.xterra.helm.nav.StyleServer.serve(
+                com.xterra.helm.nav.MapStyles.offlineStyle(com.xterra.helm.nav.MapStyles.Base.TOPO))
+            val def = org.maplibre.android.offline.OfflineTilePyramidRegionDefinition(
+                styleUrl, bounds, 6.0, maxZ, ctx.resources.displayMetrics.density)
+            android.util.Log.i("Helm", "NAV_CACHE start z6-${maxZ.toInt()} bbox $s,$w..$n,$e")
+            mgr.createOfflineRegion(
+                def, """{"name":"W.Oregon z6-${maxZ.toInt()}"}""".toByteArray(),
+                object : org.maplibre.android.offline.OfflineManager.CreateOfflineRegionCallback {
+                    override fun onCreate(region: org.maplibre.android.offline.OfflineRegion) {
+                        region.setObserver(object : org.maplibre.android.offline.OfflineRegion.OfflineRegionObserver {
+                            override fun onStatusChanged(st: org.maplibre.android.offline.OfflineRegionStatus) {
+                                android.util.Log.i("Helm", "NAV_CACHE ${st.completedResourceCount} tiles · " +
+                                    "${st.completedResourceSize / 1_048_576} MB" + if (st.isComplete) " ✓DONE" else "")
+                            }
+                            override fun onError(err: org.maplibre.android.offline.OfflineRegionError) {
+                                android.util.Log.w("Helm", "NAV_CACHE err ${err.reason}: ${err.message}")
+                            }
+                            override fun mapboxTileCountLimitExceeded(limit: Long) {
+                                android.util.Log.w("Helm", "NAV_CACHE LIMIT HIT $limit")
+                            }
+                        })
+                        region.setDownloadState(org.maplibre.android.offline.OfflineRegion.STATE_ACTIVE)
+                    }
+                    override fun onError(error: String) {
+                        android.util.Log.w("Helm", "NAV_CACHE create err $error")
+                    }
+                })
+        }
+    }
+
     // Geocoder self-test (validates online Photon search + parsing on-device):
     //   adb shell am broadcast -a com.xterra.helm.NAV_SEARCH --es q "coffee"
     private val navSearch = object : BroadcastReceiver() {
@@ -120,6 +169,7 @@ class VehicleService : LifecycleService() {
         registerReceiver(navTest, IntentFilter("com.xterra.helm.NAV_TEST"), RECEIVER_EXPORTED)
         registerReceiver(navGo, IntentFilter("com.xterra.helm.NAV_GO"), RECEIVER_EXPORTED)
         registerReceiver(navSearch, IntentFilter("com.xterra.helm.NAV_SEARCH"), RECEIVER_EXPORTED)
+        registerReceiver(navCache, IntentFilter("com.xterra.helm.NAV_CACHE"), RECEIVER_EXPORTED)
         HelmApp.instance.can.start()
         HelmApp.instance.media.start()
         HelmApp.instance.homeLink.start()

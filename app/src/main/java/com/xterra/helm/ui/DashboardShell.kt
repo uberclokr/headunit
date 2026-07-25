@@ -261,7 +261,7 @@ private fun Dock(panes: PaneManager) {
         //  - TILT (INCLINE): the level bubble now lives on the vehicle pane's
         //    dash row and its gauges are a tap away via the VEHICLE trend slot.
         listOf(Widget.MAP, Widget.MEDIA, Widget.GAUGES, Widget.CAM_REAR,
-               Widget.CAM_THERMAL, Widget.SDR, Widget.NET).forEach { w ->
+               Widget.SDR, Widget.NET).forEach { w ->
             DockChip(w.label, active = panes.left == w || panes.right == w) {
                 if (panes.right != null) panes.right = w else panes.left = w
             }

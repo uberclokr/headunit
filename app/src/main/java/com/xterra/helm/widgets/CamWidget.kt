@@ -15,6 +15,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import com.xterra.helm.HelmApp
 import com.xterra.helm.cameras.RtspView
+import com.xterra.helm.cameras.ThermalView
 import com.xterra.helm.cameras.ViofoLocator
 import com.xterra.helm.ui.theme.HelmColors
 
@@ -33,6 +34,9 @@ fun CamWidget() {
     var mirror by remember { mutableStateOf(false) }
     var showClips by remember { mutableStateOf(false) }
     var playUrl by remember { mutableStateOf<String?>(null) }
+    // Thermal is nested here as just another camera view (its own USB/UVC core),
+    // not a Viofo channel — so it's a mode toggle, not a channel switch.
+    var thermal by remember { mutableStateOf(false) }
     val cam = HelmApp.instance.cameras.byId("rear")
 
     Box(Modifier.fillMaxSize()) {
@@ -45,6 +49,8 @@ fun CamWidget() {
                     playUrl = null
                 }
             }
+            // Thermal core: separate UVC source, occupies the frame like any cam.
+            thermal -> ThermalView()
             // While the clip browser is open, DON'T run the live stream — it
             // shares the one WiFi hop with the camera, and a saturated link
             // stalls the 1.4 MB clip-index download.
@@ -61,13 +67,17 @@ fun CamWidget() {
                 Modifier.align(Alignment.TopEnd).padding(10.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
+                // Viofo channels — selecting one leaves thermal mode.
                 listOf(
                     "REAR" to ViofoLocator.CH_REAR,
                     "FRONT" to ViofoLocator.CH_FRONT,
                     "CABIN" to ViofoLocator.CH_INTERIOR,
                 ).forEach { (label, c) ->
-                    CamChip(label, active = ch == c) { viofo.selectPaneChannel(c) }
+                    CamChip(label, active = !thermal && ch == c) {
+                        thermal = false; viofo.selectPaneChannel(c)
+                    }
                 }
+                CamChip("THERMAL", active = thermal) { thermal = true }
                 CamChip("MIR", active = mirror) { mirror = !mirror }
                 CamChip("▦ CLIPS", active = false) {
                     showClips = true; HelmApp.instance.clips.refresh()

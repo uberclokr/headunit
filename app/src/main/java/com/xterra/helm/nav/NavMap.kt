@@ -256,8 +256,7 @@ fun NavMap() {
             }
         }
 
-        // Top-left: waypoint counter + offline-cache cluster (the long CACHE
-        // chip lives in this corner, away from the map center).
+        // Top-left: search + waypoint counter.
         Column(
             Modifier.align(Alignment.TopStart)
                 .padding(start = 10.dp, end = 10.dp, bottom = 10.dp, top = topInset),
@@ -270,11 +269,13 @@ fun NavMap() {
             }
             val n = pois.features()?.size ?: 0
             LayerChip(if (n == 0) "⌖ long-press to drop WP" else "⌖ $n WP", active = false) {}
-            // Cache the framed area offline — opens a detail/size chooser (frame
-            // the area first by zooming out). Region/graph management: Settings.
-            LayerChip(cacheMsg ?: "⤓ CACHE THIS VIEW", active = cacheMsg != null || cachePanelOpen) {
-                cacheMsg = null; cachePanelOpen = true
-            }
+        }
+
+        // Bottom-left: offline-cache capture — opens a detail/size chooser (frame
+        // the area first by zooming out). Region/graph management: Settings.
+        LayerChip(cacheMsg ?: "⤓ CACHE THIS VIEW", active = cacheMsg != null || cachePanelOpen,
+            modifier = Modifier.align(Alignment.BottomStart).padding(10.dp)) {
+            cacheMsg = null; cachePanelOpen = true
         }
 
         if (cachePanelOpen) CachePanel(
@@ -346,18 +347,19 @@ fun NavMap() {
         }
 
         // Camera controls, bottom-right: short chips stack up the edge, the
-        // wide zoom-preset row sits last, tight in the corner.
+        // wide zoom-preset row sits last, tight in the corner. Order top→bottom:
+        // ME, then FOLLOW/NORTH, then the zoom presets.
         Column(
             Modifier.align(Alignment.BottomEnd).padding(10.dp),
             horizontalAlignment = Alignment.End,
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            LayerChip(if (follow) "⬆ FOLLOW" else "▲ NORTH", active = follow) {
-                follow = !follow
-            }
             // Re-lock onto the vehicle (tracking drops out when the user pans).
             LayerChip("◎ ME", active = false) {
                 mapRef.value?.let { runCatching { applyCameraMode(it, follow) } }
+            }
+            LayerChip(if (follow) "⬆ FOLLOW" else "▲ NORTH", active = follow) {
+                follow = !follow
             }
             // Tap = jump to preset; hold = overwrite preset with current zoom
             // (the label updating is the save confirmation).

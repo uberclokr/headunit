@@ -9,8 +9,7 @@ enum class Widget(val label: String) {
     MAP("NAV"),
     GAUGES("VEHICLE"),        // merged drivetrain + house-power dashboard
     MEDIA("MEDIA"),
-    CAM_REAR("CAM"),
-    CAM_THERMAL("THERMAL"),
+    CAM_REAR("CAM"),          // Viofo channels + nested thermal view
     CAM_DRONE("DRONE"),
     SDR("SDR"),
     NET("NET"),

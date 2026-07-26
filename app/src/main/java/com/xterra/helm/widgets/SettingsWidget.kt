@@ -179,8 +179,8 @@ fun SettingsWidget() {
  * Remote-access (VNC) manager. droidVNC-NG is a separate app that mirrors the
  * screen; left connected it streamed the animated dashboard over Starlink 24/7
  * (~59 GB once). This surfaces its live clients + a hard session cap (Helm's
- * root watchdog kills any VNC connection older than the cap) plus manual
- * disconnect / stop / start.
+ * root watchdog resets any VNC session older than the cap at the network layer,
+ * leaving the server listening) plus manual disconnect / stop / start.
  */
 @Composable
 private fun VncSection() {
@@ -212,10 +212,14 @@ private fun VncSection() {
     }
 
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Btn("STOP NOW", primary = true) { HelmApp.instance.vnc.stopServer() }
+        Btn("DISCONNECT", primary = true) { HelmApp.instance.vnc.disconnectNow() }
+        Btn("STOP SERVER") { HelmApp.instance.vnc.stopServer() }
         Btn("START") { HelmApp.instance.vnc.startServer() }
     }
-    Text("STOP cuts the viewer and leaves VNC off until START — no per-client kill on this ROM.",
+    Text("AUTO-CUT resets any session past the cap but keeps the server listening — " +
+        "always available for new connections. DISCONNECT cuts clients now; STOP SERVER " +
+        "takes VNC fully offline (restart from the droidVNC app). One reset drops all " +
+        "clients together — no per-client kill on this ROM.",
         style = MaterialTheme.typography.labelSmall, color = HelmColors.TextDim)
     vnc.lastAction?.let {
         Text(it, style = MaterialTheme.typography.labelSmall, color = HelmColors.Cyan)

@@ -341,25 +341,8 @@ private fun TiltGauge(deg: Float, rearView: Boolean, gForce: Float, modifier: Mo
             }
         }
 
-        // Felt-G arrow BEHIND the truck, in the vehicle frame (rotates with
-        // it): length ∝ g (full radius ≈ 1 g), color by magnitude. Rear view
-        // = lateral force, side view = longitudinal (braking pushes toward
-        // the nose). 0.04 g deadband keeps it invisible at rest.
-        if (abs(gForce) > 0.04f) {
-            val len = (abs(gForce) * r * 0.9f).coerceAtMost(r * 0.95f)
-            val dir = if (gForce >= 0f) 1f else -1f
-            val col = gColor(gForce)
-            rotate(deg, pivot = c) {
-                val tip = c + Offset(dir * len, 0f)
-                drawLine(col.copy(alpha = 0.55f), c, tip,
-                    strokeWidth = 9.dp.toPx(), cap = StrokeCap.Round)
-                for (wing in floatArrayOf(-1f, 1f)) {
-                    drawLine(col.copy(alpha = 0.55f), tip,
-                        tip + Offset(-dir * 14.dp.toPx(), wing * 10.dp.toPx()),
-                        strokeWidth = 9.dp.toPx(), cap = StrokeCap.Round)
-                }
-            }
-        }
+        // (Felt-G vector is drawn LAST — on top of the truck — so it stays
+        // visible instead of hiding under the body. See below.)
 
         // Indicator needle, drawn BEFORE the truck so the body occludes the
         // shaft — only the tip pokes above the roofline. Rotates with the
@@ -390,6 +373,38 @@ private fun TiltGauge(deg: Float, rearView: Boolean, gForce: Float, modifier: Mo
                 )
             } else if (rearView) drawTruckRear(c, r * 0.82f, severity(deg))
             else drawTruckSide(c, r * 0.82f, severity(deg))
+        }
+
+        // Felt-G vector, ON TOP of the truck (vehicle frame — rotates with
+        // it): rear view = lateral force, side view = longitudinal (braking
+        // pushes toward the nose); length ∝ g, full radius ≈ 1 g. A persistent
+        // hub marks the origin so the indicator NEVER blinks out at rest, and
+        // the arrow FADES in via a smoothstep on |g| (0.03→0.10 g) rather than
+        // a hard on/off deadband — so near-zero jitter dissolves into the hub
+        // instead of flickering a stub on and off behind the body.
+        run {
+            val gMag = abs(gForce)
+            val col = gColor(gForce)
+            rotate(deg, pivot = c) {
+                val fade = ((gMag - 0.03f) / 0.07f).coerceIn(0f, 1f)
+                if (fade > 0f) {
+                    val len = (gMag * r * 0.9f).coerceAtMost(r * 0.95f)
+                    val dir = if (gForce >= 0f) 1f else -1f
+                    val tip = c + Offset(dir * len, 0f)
+                    val a = 0.9f * fade
+                    drawLine(col.copy(alpha = a), c, tip,
+                        strokeWidth = 8.dp.toPx(), cap = StrokeCap.Round)
+                    for (wing in floatArrayOf(-1f, 1f)) {
+                        drawLine(col.copy(alpha = a), tip,
+                            tip + Offset(-dir * 14.dp.toPx(), wing * 10.dp.toPx()),
+                            strokeWidth = 8.dp.toPx(), cap = StrokeCap.Round)
+                    }
+                }
+                // Always-on hub: a small filled dot ringed against the body so
+                // the g origin is legible whatever the truck art behind it.
+                drawCircle(col, 6.dp.toPx(), c)
+                drawCircle(HelmColors.Glass, 3.dp.toPx(), c)
+            }
         }
     }
 }

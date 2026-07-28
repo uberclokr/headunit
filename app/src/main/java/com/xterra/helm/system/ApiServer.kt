@@ -153,6 +153,18 @@ object ApiServer {
                 "reverse" to can.reverse,
                 "doorOpen" to can.doorOpen, "bcmByte0" to can.bcmByte0,
             ),
+            // Derived range/fuel/charge (PROPOSALS.md Tier 1) — computed here so
+            // the companion gets the same numbers without duplicating the math.
+            "energy" to com.xterra.helm.can.VehicleEnergy.let { e ->
+                mapOf(
+                    "rangeMi" to e.driveRangeMi(can.fuelLevelPct, can.avgMpg),
+                    "roundTripMi" to e.roundTripRadiusMi(can.fuelLevelPct, can.avgMpg),
+                    "fuelGal" to e.fuelGal(can.fuelLevelPct),
+                    "fuelFlowGph" to e.fuelFlowGph(can.mafGs),
+                    "idleHours" to e.idleHoursRemaining(can.fuelLevelPct, can.mafGs),
+                    "charge" to e.charge(can.rpm, can.batteryV, can.connected).name,
+                )
+            },
             "battery" to mapOf(
                 "connected" to batt.connected, "socPct" to batt.socPct,
                 "volts" to batt.volts, "amps" to batt.amps, "watts" to batt.watts,

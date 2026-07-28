@@ -172,7 +172,9 @@ private class MpgIntegrator {
         val dt = if (lastT == 0L) 0.0 else (now - lastT) / 1000.0
         lastT = now
         val mph = speedKmh * 0.621371
-        val galPerHr = mafGs / 14.7 / 453.6 / 6.17 * 3600.0
+        // Single source of truth for the MAF→fuel-flow relation (also drives
+        // the generator/idle math in VehicleEnergy).
+        val galPerHr = (VehicleEnergy.fuelFlowGph(mafGs) ?: 0f).toDouble()
         if (dt in 0.05..5.0) { sumMiles += mph * dt / 3600.0; sumGal += galPerHr * dt / 3600.0 }
         if (galPerHr < 0.01) return null
         return (mph / galPerHr).toFloat().coerceIn(0f, 99.9f)

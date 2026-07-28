@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xterra.helm.HelmApp
 import com.xterra.helm.can.TrendSample
+import com.xterra.helm.can.VehicleEnergy
 import com.xterra.helm.can.VehicleState
 import com.xterra.helm.ui.theme.HelmColors
 import kotlin.math.abs
@@ -115,7 +116,10 @@ fun GaugesWidget() {
         }
 
         Spacer(Modifier.height(12.dp))
-        PowerSections(batt, starterV = s.batteryV, ecuOnline = s.connected)
+        PowerSections(batt, starterV = s.batteryV, ecuOnline = s.connected,
+            charge = VehicleEnergy.charge(s.rpm, s.batteryV, s.connected))
+        Spacer(Modifier.height(12.dp))
+        EnergySection(s, batt)
     }
 }
 
@@ -150,6 +154,7 @@ private fun StatTile(
 @Composable
 private fun PowerSections(
     b: com.xterra.helm.power.BattState, starterV: Float?, ecuOnline: Boolean,
+    charge: VehicleEnergy.Charge,
 ) {
     val socColor = when {
         !b.connected  -> HelmColors.TextDim
@@ -191,6 +196,16 @@ private fun PowerSections(
             Text("STARTER BATTERY · via ECM", style = MaterialTheme.typography.labelSmall,
                 color = HelmColors.TextDim)
             Spacer(Modifier.weight(1f))
+            // Alternator/charge-system verdict from the bus voltage while
+            // running — the early warning for a dead alternator or slipped
+            // belt. Blank when the engine's off (nothing to judge).
+            if (charge == VehicleEnergy.Charge.CHARGING ||
+                charge == VehicleEnergy.Charge.WEAK ||
+                charge == VehicleEnergy.Charge.NOT_CHARGING) {
+                Text(charge.label, style = MaterialTheme.typography.labelSmall,
+                    color = chargeColor(charge))
+                Spacer(Modifier.width(10.dp))
+            }
             // <11.8 V with the engine-off is a tired lead-acid battery;
             // dashes when the ECU is asleep (key off).
             val v = starterV.takeIf { ecuOnline }
@@ -201,6 +216,62 @@ private fun PowerSections(
                     v < 11.8f -> HelmColors.Alert
                     else -> HelmColors.Cyan
                 })
+        }
+    }
+}
+
+private fun chargeColor(c: VehicleEnergy.Charge) = when (c) {
+    VehicleEnergy.Charge.CHARGING -> HelmColors.Ok
+    VehicleEnergy.Charge.WEAK -> HelmColors.Amber
+    VehicleEnergy.Charge.NOT_CHARGING -> HelmColors.Alert
+    else -> HelmColors.TextDim
+}
+
+/**
+ * Range & fuel endurance (PROPOSALS.md Tier 1): drivable range with a reserve
+ * held back, the round-trip radius that actually matters before committing to
+ * a spur on a search, fuel aboard, and — when idling as a generator — burn
+ * rate, idle endurance, and house-pack time-to-full. Null-safe: every field
+ * reads "—" until the ECU reports a fuel level and a trip MPG.
+ */
+@Composable
+private fun EnergySection(s: VehicleState, b: com.xterra.helm.power.BattState) {
+    val range = VehicleEnergy.driveRangeMi(s.fuelLevelPct, s.avgMpg)
+    val radius = VehicleEnergy.roundTripRadiusMi(s.fuelLevelPct, s.avgMpg)
+    val gal = VehicleEnergy.fuelGal(s.fuelLevelPct)
+    val gph = VehicleEnergy.fuelFlowGph(s.mafGs)
+    val idling = VehicleEnergy.isIdling(s.rpm, s.speedKmh, s.connected)
+    val idleH = if (idling) VehicleEnergy.idleHoursRemaining(s.fuelLevelPct, s.mafGs) else null
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("RANGE & FUEL", style = MaterialTheme.typography.labelSmall,
+                color = HelmColors.Amber)
+            Spacer(Modifier.weight(1f))
+            if (!s.connected) Text("ECU ASLEEP", style = MaterialTheme.typography.labelSmall,
+                color = HelmColors.TextDim)
+        }
+        Spacer(Modifier.height(6.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            Readout("RANGE", range?.let { "%.0f mi".format(it) } ?: "—",
+                alert = range != null && range < 40f)
+            Readout("↺ TURN", radius?.let { "%.0f mi".format(it) } ?: "—")
+            Readout("FUEL", gal?.let { "%.1f gal".format(it) } ?: "—")
+            Readout(if (idling) "IDLE" else "BURN", gph?.let { "%.1f gph".format(it) } ?: "—")
+        }
+        if (idling) {
+            val houseFull = if (b.connected && b.charging) b.hoursRemaining else null
+            val caption = buildString {
+                idleH?.let { append("idle endurance %.0f h".format(it)) }
+                houseFull?.let {
+                    if (isNotEmpty()) append("  ·  ")
+                    append("house full %.1f h".format(it))
+                }
+            }
+            if (caption.isNotEmpty()) {
+                Spacer(Modifier.height(4.dp))
+                Text(caption, style = MaterialTheme.typography.labelSmall,
+                    color = HelmColors.TextDim)
+            }
         }
     }
 }

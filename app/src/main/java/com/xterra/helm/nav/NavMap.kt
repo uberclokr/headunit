@@ -82,6 +82,8 @@ fun NavMap() {
     var lockedOnce by remember { mutableStateOf(false) }
     // Follow-behind (heading-up, tilted chase cam) vs north-up overview.
     var follow by remember { mutableStateOf(true) }
+    // Show the round-trip range ring (only visible when fuel + MPG are known).
+    var rangeOn by remember { mutableStateOf(true) }
     // Waypoints (GeoJSON) + the currently tapped one (id to name).
     val pois by HelmApp.instance.poi.pois.collectAsState()
     var selected by remember { mutableStateOf<Pair<String, String>?>(null) }
@@ -121,8 +123,10 @@ fun NavMap() {
         if (nav.route != null) voice.reset() else bannerH = 0.dp
     }
     // Round-trip range ring: re-centre on the vehicle and re-scale as fuel or
-    // trip MPG change. Draws nothing until both a fix and a real MPG exist.
-    LaunchedEffect(gps.lat, gps.lon, gps.hasFix, veh.fuelLevelPct, veh.avgMpg) {
+    // trip MPG change. Draws nothing until both a fix and a real MPG exist, or
+    // when the user has toggled it off.
+    LaunchedEffect(gps.lat, gps.lon, gps.hasFix, veh.fuelLevelPct, veh.avgMpg, rangeOn) {
+        rangeRingEnabled = rangeOn
         updateRangeRing(mapRef.value)
     }
     // Debounced geocode: re-query ~350 ms after typing stops, biased to the fix.
@@ -421,6 +425,9 @@ fun NavMap() {
             LayerChip(if (follow) "⬆ FOLLOW" else "▲ NORTH", active = follow) {
                 follow = !follow
             }
+            // Show/hide the round-trip range ring (auto-hidden anyway until
+            // there's a trip MPG to size it).
+            LayerChip("◎ RING", active = rangeOn) { rangeOn = !rangeOn }
             // Tap = jump to preset; hold = overwrite preset with current zoom
             // (the label updating is the save confirmation).
             val zooms = HelmApp.instance.settings.state.collectAsState().value.navZooms
@@ -566,6 +573,9 @@ private fun applyStyle(ctx: Context, map: MapLibreMap, base: MapStyles.Base) {
 
 private const val EARTH_M = 6_371_000.0
 private const val EMPTY_FC = """{"type":"FeatureCollection","features":[]}"""
+// User toggle, mirrored from Compose state so applyStyle() (which runs outside
+// the composable, on restyle) honours it too.
+private var rangeRingEnabled = true
 
 /**
  * Recompute the round-trip range ring from live fuel + trip MPG and re-centre
@@ -579,7 +589,7 @@ private fun updateRangeRing(map: MapLibreMap?) {
     val g = HelmApp.instance.gps.state.value
     val radiusMi = VehicleEnergy.roundTripRadiusMi(v.fuelLevelPct, v.avgMpg)
     src.setGeoJson(
-        if (g.hasFix && radiusMi != null)
+        if (rangeRingEnabled && g.hasFix && radiusMi != null)
             rangeRingGeoJson(g.lat, g.lon, radiusMi * 1609.344)
         else EMPTY_FC,
     )

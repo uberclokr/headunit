@@ -49,6 +49,16 @@ as the existing `ELM_CMD` probe.
 
 ## Tier 1 — don't get stranded (highest value for remote SAR)
 
+> **Status: IMPLEMENTED.** All three built on the existing PIDs, no new ones
+> needed. Math lives in the unit-tested `VehicleEnergy`; surfaced in the VEHICLE
+> pane (RANGE & FUEL + alternator verdict on the STARTER row), on the nav map
+> (round-trip range ring with a RING toggle + the reserve banner), in the status
+> API (`energy` block), and in the phone companion (RANGE & FUEL card). Fuel/base
+> waypoint categories drive the reserve alert. Not yet validated against a live
+> running engine — the numbers populate the first time the ECU is awake with a
+> trip MPG. Remaining polish: a proper isochrone (vs a circle) and the
+> "start-engine-to-charge" nudge.
+
 ### 1. Round-trip range ring on the nav map
 **What:** `fuel% × tank_capacity × avgMPG` → a drivable-range overlay on
 MapLibre. The load-bearing variant is **"can I reach that waypoint *and get

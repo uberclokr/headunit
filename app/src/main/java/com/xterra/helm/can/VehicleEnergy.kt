@@ -74,6 +74,15 @@ object VehicleEnergy {
     fun isIdling(rpm: Int, speedKmh: Int, connected: Boolean): Boolean =
         connected && rpm in ENGINE_RUN_RPM until 1400 && speedKmh < 5
 
+    /**
+     * True when the drivable range no longer covers the distance to the nearest
+     * refuel/base point — "you may not make it to fuel." Both in miles; false
+     * (no alarm) whenever either input is unknown, so a missing MPG or an empty
+     * waypoint set never cries wolf.
+     */
+    fun reserveShort(rangeMi: Float?, nearestFuelMi: Float?): Boolean =
+        rangeMi != null && nearestFuelMi != null && rangeMi < nearestFuelMi
+
     /** Charge-system verdict from bus voltage vs engine state. */
     enum class Charge(val label: String) {
         OFFLINE("—"),                 // ECU asleep / no voltage reported

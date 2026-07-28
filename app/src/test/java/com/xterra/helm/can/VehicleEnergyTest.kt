@@ -59,6 +59,13 @@ class VehicleEnergyTest {
         assertTrue(!VehicleEnergy.isIdling(750, 0, connected = false))   // no ECU
     }
 
+    @Test fun reserveShort_onlyWhenRangeBelowNearestFuel() {
+        assertTrue(VehicleEnergy.reserveShort(80f, 140f))    // can't reach fuel
+        assertTrue(!VehicleEnergy.reserveShort(200f, 140f))  // plenty
+        assertTrue(!VehicleEnergy.reserveShort(null, 140f))  // no MPG yet
+        assertTrue(!VehicleEnergy.reserveShort(80f, null))   // no fuel/base waypoint
+    }
+
     @Test fun charge_verdicts() {
         assertEquals(VehicleEnergy.Charge.OFFLINE, VehicleEnergy.charge(0, null, false))
         assertEquals(VehicleEnergy.Charge.ENGINE_OFF, VehicleEnergy.charge(0, 12.4f, true))

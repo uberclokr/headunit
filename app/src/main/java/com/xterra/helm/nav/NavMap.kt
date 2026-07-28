@@ -52,6 +52,7 @@ import org.maplibre.android.style.layers.CircleLayer
 import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.layers.PropertyFactory
+import org.maplibre.android.style.expressions.Expression
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.FeatureCollection
 import com.xterra.helm.can.VehicleEnergy
@@ -84,6 +85,15 @@ fun NavMap() {
     // Waypoints (GeoJSON) + the currently tapped one (id to name).
     val pois by HelmApp.instance.poi.pois.collectAsState()
     var selected by remember { mutableStateOf<Pair<String, String>?>(null) }
+    // Reserve check: can the one-way range still reach the nearest fuel/base?
+    // Recomputed when the fix, the waypoints, or fuel/MPG change.
+    val nearestFuel = remember(pois, gps.lat, gps.lon, gps.hasFix) {
+        if (gps.hasFix) HelmApp.instance.poi.nearest(gps.lat, gps.lon, PoiStore.REFUEL_KINDS)
+        else null
+    }
+    val oneWayRangeMi = VehicleEnergy.driveRangeMi(veh.fuelLevelPct, veh.avgMpg)
+    val nearestFuelMi = nearestFuel?.let { (it.distanceM / 1609.344).toFloat() }
+    val reserveShort = VehicleEnergy.reserveShort(oneWayRangeMi, nearestFuelMi)
     // LoRaWAN tracker nodes — shown as green dots when the LNS is enabled.
     val loraStates by HelmApp.instance.lora.states.collectAsState()
     val loraCfg by HelmApp.instance.lora.config.collectAsState()
@@ -310,51 +320,89 @@ fun NavMap() {
             onClose = { searchOpen = false; query = ""; results = emptyList() },
         )
 
-        // Selected waypoint card: rename inline, quick delete.
+        // Reserve alert: the one-way range no longer reaches the nearest fuel
+        // or base. Genuine red banner — this is the "you may be walking" call.
+        if (reserveShort && nearestFuel != null && oneWayRangeMi != null) {
+            Row(
+                Modifier.align(Alignment.TopCenter).padding(top = 58.dp)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(HelmColors.Alert.copy(alpha = 0.94f))
+                    .padding(horizontal = 12.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("⚠ FUEL", style = MaterialTheme.typography.labelSmall,
+                    color = HelmColors.Glass)
+                Text("nearest ${nearestFuel.kind} %.0f mi · range %.0f mi"
+                    .format(nearestFuelMi, oneWayRangeMi),
+                    style = MaterialTheme.typography.labelSmall, color = HelmColors.Glass)
+            }
+        }
+
+        // Selected waypoint card: rename, re-tag (wp/fuel/base), route, delete.
         selected?.let { (id, name) ->
             var editName by remember(id) { mutableStateOf(name) }
-            Row(
+            val curKind = pois.features()
+                ?.firstOrNull { it.getStringProperty("id") == id }
+                ?.getStringProperty("kind") ?: PoiStore.KIND_WP
+            Column(
                 Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp)
                     .clip(RoundedCornerShape(10.dp))
                     .background(HelmColors.Panel.copy(alpha = 0.92f))
                     .padding(horizontal = 14.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                BasicTextField(
-                    value = editName, onValueChange = { editName = it },
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.bodyMedium
-                        .copy(color = HelmColors.Text),
-                    cursorBrush = SolidColor(HelmColors.Amber),
-                    modifier = Modifier.widthIn(min = 90.dp, max = 220.dp)
-                        .background(HelmColors.Glass, RoundedCornerShape(6.dp))
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                )
-                // Route to this waypoint from the current fix (turn-by-turn).
-                LayerChip(if (nav.engineReady) "▶ NAVIGATE" else "▶ (no map)",
-                    active = nav.route != null) {
-                    if (nav.engineReady) {
-                        val pt = pois.features()
-                            ?.firstOrNull { it.getStringProperty("id") == id }
-                            ?.geometry() as? org.maplibre.geojson.Point
-                        pt?.let {
-                            HelmApp.instance.nav.navigateTo(
-                                it.latitude(), it.longitude(),
-                                name.ifBlank { "Waypoint" })
-                        }
-                        selected = null
+                Row(verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    BasicTextField(
+                        value = editName, onValueChange = { editName = it },
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodyMedium
+                            .copy(color = HelmColors.Text),
+                        cursorBrush = SolidColor(HelmColors.Amber),
+                        modifier = Modifier.widthIn(min = 90.dp, max = 200.dp)
+                            .background(HelmColors.Glass, RoundedCornerShape(6.dp))
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                    )
+                    // Category drives the reserve alert + the dot color.
+                    LayerChip("WP", active = curKind == PoiStore.KIND_WP) {
+                        HelmApp.instance.poi.setKind(id, PoiStore.KIND_WP)
+                    }
+                    LayerChip("⛽FUEL", active = curKind == PoiStore.KIND_FUEL) {
+                        HelmApp.instance.poi.setKind(id, PoiStore.KIND_FUEL)
+                    }
+                    LayerChip("⌂BASE", active = curKind == PoiStore.KIND_BASE) {
+                        HelmApp.instance.poi.setKind(id, PoiStore.KIND_BASE)
                     }
                 }
-                LayerChip("✓", active = false) {
-                    editName.trim().takeIf { it.isNotEmpty() && it != name }
-                        ?.let { HelmApp.instance.poi.rename(id, it) }
-                    selected = null
+                Row(verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    // Route to this waypoint from the current fix (turn-by-turn).
+                    LayerChip(if (nav.engineReady) "▶ NAVIGATE" else "▶ (no map)",
+                        active = nav.route != null) {
+                        if (nav.engineReady) {
+                            val pt = pois.features()
+                                ?.firstOrNull { it.getStringProperty("id") == id }
+                                ?.geometry() as? org.maplibre.geojson.Point
+                            pt?.let {
+                                HelmApp.instance.nav.navigateTo(
+                                    it.latitude(), it.longitude(),
+                                    name.ifBlank { "Waypoint" })
+                            }
+                            selected = null
+                        }
+                    }
+                    LayerChip("✓", active = false) {
+                        editName.trim().takeIf { it.isNotEmpty() && it != name }
+                            ?.let { HelmApp.instance.poi.rename(id, it) }
+                        selected = null
+                    }
+                    LayerChip("DELETE", active = false) {
+                        HelmApp.instance.poi.remove(id); selected = null
+                    }
+                    LayerChip("✕", active = false) { selected = null }
                 }
-                LayerChip("DELETE", active = false) {
-                    HelmApp.instance.poi.remove(id); selected = null
-                }
-                LayerChip("✕", active = false) { selected = null }
             }
         }
 
@@ -490,7 +538,13 @@ private fun applyStyle(ctx: Context, map: MapLibreMap, base: MapStyles.Base) {
         // imagery alike. Re-added on every restyle (setStyle rebuilds layers).
         style.addSource(GeoJsonSource(POI_SRC, HelmApp.instance.poi.pois.value))
         style.addLayer(CircleLayer(POI_LAYER, POI_SRC).withProperties(
-            PropertyFactory.circleColor("#FFB454"),
+            // Colour by category so fuel/base waypoints stand out from plain
+            // ones: fuel = orange-red, base = cyan, everything else amber.
+            PropertyFactory.circleColor(Expression.match(
+                Expression.get("kind"),
+                Expression.literal(PoiStore.KIND_FUEL), Expression.rgb(255, 106, 61),
+                Expression.literal(PoiStore.KIND_BASE), Expression.rgb(127, 215, 232),
+                Expression.rgb(255, 180, 84))),
             PropertyFactory.circleRadius(7f),
             PropertyFactory.circleStrokeColor("#FFFFFF"),
             PropertyFactory.circleStrokeWidth(2f),

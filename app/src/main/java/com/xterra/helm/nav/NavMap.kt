@@ -54,6 +54,11 @@ import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.layers.PropertyFactory
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.FeatureCollection
+import com.xterra.helm.can.VehicleEnergy
+import kotlin.math.asin
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.sin
 
 /**
  * Backcountry nav map on MapLibre Native. USGS Topo (or imagery) draped over
@@ -70,6 +75,8 @@ fun NavMap() {
     var base by remember { mutableStateOf(MapStyles.Base.TOPO) }
     val mapRef = remember { mutableStateOf<MapLibreMap?>(null) }
     val gps by HelmApp.instance.gps.state.collectAsState()
+    // Vehicle state → the round-trip range ring (fuel + trip MPG).
+    val veh by HelmApp.instance.can.state.collectAsState()
     // Lock onto the vehicle once, when the first fix lands after startup.
     var lockedOnce by remember { mutableStateOf(false) }
     // Follow-behind (heading-up, tilted chase cam) vs north-up overview.
@@ -102,6 +109,11 @@ fun NavMap() {
         mapRef.value?.style?.getSourceAs<GeoJsonSource>(ROUTE_SRC)
             ?.setGeoJson(routeGeoJson(nav.route))
         if (nav.route != null) voice.reset() else bannerH = 0.dp
+    }
+    // Round-trip range ring: re-centre on the vehicle and re-scale as fuel or
+    // trip MPG change. Draws nothing until both a fix and a real MPG exist.
+    LaunchedEffect(gps.lat, gps.lon, gps.hasFix, veh.fuelLevelPct, veh.avgMpg) {
+        updateRangeRing(mapRef.value)
     }
     // Debounced geocode: re-query ~350 ms after typing stops, biased to the fix.
     LaunchedEffect(query) {
@@ -444,6 +456,18 @@ private fun GpsFix.toLocation(): Location = Location("helm-gps").apply {
 
 private fun applyStyle(ctx: Context, map: MapLibreMap, base: MapStyles.Base) {
     map.setStyle(Style.Builder().fromJson(MapStyles.style(base))) { style ->
+        // Round-trip range ring: dashed amber circle at the turnaround radius —
+        // how far you can go and still get back on the fuel aboard. Added first
+        // so the route, waypoints, and puck all render above it. Populated from
+        // current state here (setStyle rebuilds layers) and kept live by the
+        // range effect.
+        style.addSource(GeoJsonSource(RANGE_SRC, EMPTY_FC))
+        style.addLayer(LineLayer(RANGE_RING, RANGE_SRC).withProperties(
+            PropertyFactory.lineColor("#FFB454"),
+            PropertyFactory.lineWidth(2.5f),
+            PropertyFactory.lineOpacity(0.8f),
+            PropertyFactory.lineDasharray(arrayOf(3f, 3f)),
+        ))
         // Active route: a cyan line over a dark casing for contrast on both topo
         // and imagery. Added first so waypoints, LoRa dots, and the puck all
         // render above it. Fed live from NavRepository (see the route effect).
@@ -482,7 +506,48 @@ private fun applyStyle(ctx: Context, map: MapLibreMap, base: MapStyles.Base) {
             PropertyFactory.circleStrokeWidth(2f),
         ))
         if (hasLocationPermission(ctx)) enableLocation(ctx, map, style)
+        updateRangeRing(map)
     }
+}
+
+private const val EARTH_M = 6_371_000.0
+private const val EMPTY_FC = """{"type":"FeatureCollection","features":[]}"""
+
+/**
+ * Recompute the round-trip range ring from live fuel + trip MPG and re-centre
+ * it on the vehicle. Reads the repositories directly (one-shot, like the other
+ * layer updates). Clears to an empty collection when there's no fix or no
+ * trustworthy MPG yet, so the map is simply unmarked rather than wrong.
+ */
+private fun updateRangeRing(map: MapLibreMap?) {
+    val src = map?.style?.getSourceAs<GeoJsonSource>(RANGE_SRC) ?: return
+    val v = HelmApp.instance.can.state.value
+    val g = HelmApp.instance.gps.state.value
+    val radiusMi = VehicleEnergy.roundTripRadiusMi(v.fuelLevelPct, v.avgMpg)
+    src.setGeoJson(
+        if (g.hasFix && radiusMi != null)
+            rangeRingGeoJson(g.lat, g.lon, radiusMi * 1609.344)
+        else EMPTY_FC,
+    )
+}
+
+/** A closed geodesic circle of [radiusM] around a point, as a GeoJSON polygon. */
+private fun rangeRingGeoJson(lat: Double, lon: Double, radiusM: Double): String {
+    if (radiusM <= 0.0) return EMPTY_FC
+    val phi1 = Math.toRadians(lat)
+    val lam1 = Math.toRadians(lon)
+    val d = radiusM / EARTH_M                 // angular distance
+    val n = 90
+    val ring = StringBuilder()
+    for (i in 0..n) {
+        val th = Math.toRadians(360.0 * i / n)
+        val phi2 = asin(sin(phi1) * cos(d) + cos(phi1) * sin(d) * cos(th))
+        val lam2 = lam1 + atan2(sin(th) * sin(d) * cos(phi1), cos(d) - sin(phi1) * sin(phi2))
+        if (i > 0) ring.append(',')
+        ring.append('[').append(Math.toDegrees(lam2)).append(',')
+            .append(Math.toDegrees(phi2)).append(']')
+    }
+    return """{"type":"Feature","geometry":{"type":"Polygon","coordinates":[[$ring]]}}"""
 }
 
 /** GeoJSON FeatureCollection string for the LoRa nodes that have a fix. */
@@ -496,6 +561,8 @@ private fun loraGeoJson(states: List<com.xterra.helm.lora.LoraNodeState>): Strin
     return """{"type":"FeatureCollection","features":[$feats]}"""
 }
 
+private const val RANGE_SRC = "helm-range"
+private const val RANGE_RING = "helm-range-ring"
 private const val POI_SRC = "helm-pois"
 private const val POI_LAYER = "helm-poi-dots"
 private const val LORA_SRC = "helm-lora"

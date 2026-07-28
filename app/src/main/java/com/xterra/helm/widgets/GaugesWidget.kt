@@ -115,11 +115,15 @@ fun GaugesWidget() {
                 alert = (maxTilt ?: 0f) >= 25f) { sel = GMetric.TILT }
         }
 
-        Spacer(Modifier.height(12.dp))
-        PowerSections(batt, starterV = s.batteryV, ecuOnline = s.connected,
-            charge = VehicleEnergy.charge(s.rpm, s.batteryV, s.connected))
+        // ECM/ECU-reported values grouped together (range/fuel + starter batt)
+        // above the house battery, which comes off a different link (Renogy BLE).
         Spacer(Modifier.height(12.dp))
         EnergySection(s, batt)
+        Spacer(Modifier.height(12.dp))
+        StarterSection(starterV = s.batteryV, ecuOnline = s.connected,
+            charge = VehicleEnergy.charge(s.rpm, s.batteryV, s.connected))
+        Spacer(Modifier.height(12.dp))
+        HouseSection(batt)
     }
 }
 
@@ -144,18 +148,45 @@ private fun StatTile(
 }
 
 /**
- * Power block for the merged panel, split so there's never a bare "voltage"
- * with an ambiguous owner:
- *  - HOUSE (primary): the Renogy LiFePO4 — SOC bar tinted by state (green
- *    charging / amber discharging / red low) + volts/amps/watts/pack temp.
- *  - STARTER (secondary): just the lead-acid start battery's voltage, as the
- *    ECM reports it over OBD.
+ * Starter battery (secondary, ECM-reported): the lead-acid start battery's
+ * voltage as the ECM reports it over OBD, plus the alternator/charge-system
+ * verdict from that bus voltage while running — the early warning for a dead
+ * alternator or slipped belt. Grouped with the other ECM-derived rows.
  */
 @Composable
-private fun PowerSections(
-    b: com.xterra.helm.power.BattState, starterV: Float?, ecuOnline: Boolean,
-    charge: VehicleEnergy.Charge,
-) {
+private fun StarterSection(starterV: Float?, ecuOnline: Boolean, charge: VehicleEnergy.Charge) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("STARTER BATTERY · via ECM", style = MaterialTheme.typography.labelSmall,
+            color = HelmColors.TextDim)
+        Spacer(Modifier.weight(1f))
+        // Charge verdict — blank when the engine's off (nothing to judge).
+        if (charge == VehicleEnergy.Charge.CHARGING ||
+            charge == VehicleEnergy.Charge.WEAK ||
+            charge == VehicleEnergy.Charge.NOT_CHARGING) {
+            Text(charge.label, style = MaterialTheme.typography.labelSmall,
+                color = chargeColor(charge))
+            Spacer(Modifier.width(10.dp))
+        }
+        // <11.8 V with the engine-off is a tired lead-acid battery;
+        // dashes when the ECU is asleep (key off).
+        val v = starterV.takeIf { ecuOnline }
+        Text(v?.let { "%.1f V".format(it) } ?: "—",
+            style = MaterialTheme.typography.titleMedium,
+            color = when {
+                v == null -> HelmColors.TextDim
+                v < 11.8f -> HelmColors.Alert
+                else -> HelmColors.Cyan
+            })
+    }
+}
+
+/**
+ * House battery (primary): the Renogy LiFePO4 — SOC bar tinted by state (green
+ * charging / amber discharging / red low) + volts/amps/watts/pack temp. Comes
+ * off the Renogy BLE link, not the ECM, so it lives below the ECM rows.
+ */
+@Composable
+private fun HouseSection(b: com.xterra.helm.power.BattState) {
     val socColor = when {
         !b.connected  -> HelmColors.TextDim
         b.socPct < 20 -> HelmColors.Alert
@@ -190,33 +221,6 @@ private fun PowerSections(
             Readout("WATTS", "%+.0f".format(b.watts))
             b.tempC?.let { Readout("PACK", "%.0f°C".format(it), alert = it > 45f || it < 0f) }
         }
-
-        Spacer(Modifier.height(12.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("STARTER BATTERY · via ECM", style = MaterialTheme.typography.labelSmall,
-                color = HelmColors.TextDim)
-            Spacer(Modifier.weight(1f))
-            // Alternator/charge-system verdict from the bus voltage while
-            // running — the early warning for a dead alternator or slipped
-            // belt. Blank when the engine's off (nothing to judge).
-            if (charge == VehicleEnergy.Charge.CHARGING ||
-                charge == VehicleEnergy.Charge.WEAK ||
-                charge == VehicleEnergy.Charge.NOT_CHARGING) {
-                Text(charge.label, style = MaterialTheme.typography.labelSmall,
-                    color = chargeColor(charge))
-                Spacer(Modifier.width(10.dp))
-            }
-            // <11.8 V with the engine-off is a tired lead-acid battery;
-            // dashes when the ECU is asleep (key off).
-            val v = starterV.takeIf { ecuOnline }
-            Text(v?.let { "%.1f V".format(it) } ?: "—",
-                style = MaterialTheme.typography.titleMedium,
-                color = when {
-                    v == null -> HelmColors.TextDim
-                    v < 11.8f -> HelmColors.Alert
-                    else -> HelmColors.Cyan
-                })
-        }
     }
 }
 
@@ -243,13 +247,10 @@ private fun EnergySection(s: VehicleState, b: com.xterra.helm.power.BattState) {
     val idling = VehicleEnergy.isIdling(s.rpm, s.speedKmh, s.connected)
     val idleH = if (idling) VehicleEnergy.idleHoursRemaining(s.fuelLevelPct, s.mafGs) else null
     Column {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("RANGE & FUEL", style = MaterialTheme.typography.labelSmall,
-                color = HelmColors.Amber)
-            Spacer(Modifier.weight(1f))
-            if (!s.connected) Text("ECU ASLEEP", style = MaterialTheme.typography.labelSmall,
-                color = HelmColors.TextDim)
-        }
+        // No ECU-offline label here — the trend graph already carries that;
+        // the "—" readouts below say it plainly enough.
+        Text("RANGE & FUEL", style = MaterialTheme.typography.labelSmall,
+            color = HelmColors.Amber)
         Spacer(Modifier.height(6.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
             Readout("RANGE", range?.let { "%.0f mi".format(it) } ?: "—",

@@ -95,16 +95,16 @@ fun InclineWidget() {
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     GaugeCell(t.rollDeg, rearView = true, label = "ROLL",
-                        gForce = t.latG, modifier = Modifier.weight(1f))
+                        modifier = Modifier.weight(1f))
                     GaugeCell(t.pitchDeg, rearView = false, label = "PITCH",
-                        gForce = t.lonG, modifier = Modifier.weight(1f))
+                        modifier = Modifier.weight(1f))
                 }
             } else {
                 Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     GaugeCellTall(t.rollDeg, rearView = true, label = "ROLL",
-                        gForce = t.latG, modifier = Modifier.weight(1f).fillMaxWidth())
+                        modifier = Modifier.weight(1f).fillMaxWidth())
                     GaugeCellTall(t.pitchDeg, rearView = false, label = "PITCH",
-                        gForce = t.lonG, modifier = Modifier.weight(1f).fillMaxWidth())
+                        modifier = Modifier.weight(1f).fillMaxWidth())
                 }
             }
         }
@@ -153,9 +153,9 @@ fun InclineMini(modifier: Modifier = Modifier) {
             horizontalArrangement = Arrangement.spacedBy(14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            MiniGaugeCell(t.rollDeg, rearView = true, "ROLL", t.latG,
+            MiniGaugeCell(t.rollDeg, rearView = true, "ROLL",
                 Modifier.weight(1f).fillMaxHeight())
-            MiniGaugeCell(t.pitchDeg, rearView = false, "PITCH", t.lonG,
+            MiniGaugeCell(t.pitchDeg, rearView = false, "PITCH",
                 Modifier.weight(1f).fillMaxHeight())
         }
     }
@@ -163,10 +163,10 @@ fun InclineMini(modifier: Modifier = Modifier) {
 
 /** Gauge with its numeral + label stacked beneath (no overlap with the arc). */
 @Composable
-private fun MiniGaugeCell(deg: Float, rearView: Boolean, label: String, g: Float, modifier: Modifier) {
+private fun MiniGaugeCell(deg: Float, rearView: Boolean, label: String, modifier: Modifier) {
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center) {
-        TiltGauge(deg, rearView, g, Modifier.weight(1f).fillMaxWidth())
+        TiltGauge(deg, rearView, Modifier.weight(1f).fillMaxWidth())
         Text(if (abs(deg) < 0.05f) "0.0°" else "%+.1f°".format(deg),
             style = MaterialTheme.typography.headlineSmall, color = severity(deg))
         Text(label, style = MaterialTheme.typography.labelSmall, color = HelmColors.TextDim)
@@ -196,25 +196,13 @@ fun LevelBubble(modifier: Modifier = Modifier) {
 
 /** Wide-pane cell: gauge with its numeral snugged directly beneath. */
 @Composable
-private fun GaugeCell(
-    deg: Float, rearView: Boolean, label: String, gForce: Float, modifier: Modifier,
-) {
+private fun GaugeCell(deg: Float, rearView: Boolean, label: String, modifier: Modifier) {
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         // 1.28 ≈ the semicircle + truck's natural envelope: full half-width
         // radius with no slack above or below.
-        TiltGauge(deg, rearView, gForce, Modifier.fillMaxWidth().aspectRatio(1.28f))
+        TiltGauge(deg, rearView, Modifier.fillMaxWidth().aspectRatio(1.28f))
         BigAngle(deg)
-        GaugeLabel(label, gForce)
-    }
-}
-
-@Composable
-private fun GaugeLabel(label: String, gForce: Float) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(label, style = MaterialTheme.typography.labelSmall,
-            color = HelmColors.TextDim)
-        Text("%.2f g".format(abs(gForce)),
-            style = MaterialTheme.typography.labelSmall, color = gColor(gForce))
+        Text(label, style = MaterialTheme.typography.labelSmall, color = HelmColors.TextDim)
     }
 }
 
@@ -223,17 +211,15 @@ private fun GaugeLabel(label: String, gForce: Float) {
  * the lower-right corner — dead space outside the protractor's arc.
  */
 @Composable
-private fun GaugeCellTall(
-    deg: Float, rearView: Boolean, label: String, gForce: Float, modifier: Modifier,
-) {
+private fun GaugeCellTall(deg: Float, rearView: Boolean, label: String, modifier: Modifier) {
     Box(modifier) {
-        TiltGauge(deg, rearView, gForce, Modifier.fillMaxSize())
+        TiltGauge(deg, rearView, Modifier.fillMaxSize())
         Column(
             Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = 4.dp),
             horizontalAlignment = Alignment.End,
         ) {
             BigAngle(deg)
-            GaugeLabel(label, gForce)
+            Text(label, style = MaterialTheme.typography.labelSmall, color = HelmColors.TextDim)
         }
     }
 }
@@ -292,14 +278,8 @@ private fun rememberTruckArt(name: String): ImageBitmap? {
  * the truck rotates by the live angle (classic inclinometer presentation —
  * vehicle tips against a fixed horizon).
  */
-private fun gColor(g: Float): Color = when {
-    abs(g) >= 0.5f -> HelmColors.Alert
-    abs(g) >= 0.25f -> HelmColors.Amber
-    else -> HelmColors.Ok
-}
-
 @Composable
-private fun TiltGauge(deg: Float, rearView: Boolean, gForce: Float, modifier: Modifier) {
+private fun TiltGauge(deg: Float, rearView: Boolean, modifier: Modifier) {
     val art = rememberTruckArt(if (rearView) "xterra_rear.png" else "xterra_side.png")
     val tm = rememberTextMeasurer()
     val tickStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 11.sp,
@@ -341,9 +321,6 @@ private fun TiltGauge(deg: Float, rearView: Boolean, gForce: Float, modifier: Mo
             }
         }
 
-        // (Felt-G vector is drawn LAST — on top of the truck — so it stays
-        // visible instead of hiding under the body. See below.)
-
         // Indicator needle, drawn BEFORE the truck so the body occludes the
         // shaft — only the tip pokes above the roofline. Rotates with the
         // vehicle so its tip sweeps the fixed scale as the angle changes.
@@ -375,37 +352,6 @@ private fun TiltGauge(deg: Float, rearView: Boolean, gForce: Float, modifier: Mo
             else drawTruckSide(c, r * 0.82f, severity(deg))
         }
 
-        // Felt-G vector, ON TOP of the truck (vehicle frame — rotates with
-        // it): rear view = lateral force, side view = longitudinal (braking
-        // pushes toward the nose); length ∝ g, full radius ≈ 1 g. A persistent
-        // hub marks the origin so the indicator NEVER blinks out at rest, and
-        // the arrow FADES in via a smoothstep on |g| (0.03→0.10 g) rather than
-        // a hard on/off deadband — so near-zero jitter dissolves into the hub
-        // instead of flickering a stub on and off behind the body.
-        run {
-            val gMag = abs(gForce)
-            val col = gColor(gForce)
-            rotate(deg, pivot = c) {
-                val fade = ((gMag - 0.03f) / 0.07f).coerceIn(0f, 1f)
-                if (fade > 0f) {
-                    val len = (gMag * r * 0.9f).coerceAtMost(r * 0.95f)
-                    val dir = if (gForce >= 0f) 1f else -1f
-                    val tip = c + Offset(dir * len, 0f)
-                    val a = 0.9f * fade
-                    drawLine(col.copy(alpha = a), c, tip,
-                        strokeWidth = 8.dp.toPx(), cap = StrokeCap.Round)
-                    for (wing in floatArrayOf(-1f, 1f)) {
-                        drawLine(col.copy(alpha = a), tip,
-                            tip + Offset(-dir * 14.dp.toPx(), wing * 10.dp.toPx()),
-                            strokeWidth = 8.dp.toPx(), cap = StrokeCap.Round)
-                    }
-                }
-                // Always-on hub: a small filled dot ringed against the body so
-                // the g origin is legible whatever the truck art behind it.
-                drawCircle(col, 6.dp.toPx(), c)
-                drawCircle(HelmColors.Glass, 3.dp.toPx(), c)
-            }
-        }
     }
 }
 

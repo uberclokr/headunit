@@ -156,13 +156,19 @@ object ApiServer {
             // Derived range/fuel/charge (PROPOSALS.md Tier 1) — computed here so
             // the companion gets the same numbers without duplicating the math.
             "energy" to com.xterra.helm.can.VehicleEnergy.let { e ->
+                val range = e.driveRangeMi(can.fuelLevelPct, can.avgMpg)
+                val nearestFuel = if (gps.hasFix) app.poi.nearest(
+                    gps.lat, gps.lon, com.xterra.helm.nav.PoiStore.REFUEL_KINDS) else null
+                val nearestFuelMi = nearestFuel?.let { (it.distanceM / 1609.344).toFloat() }
                 mapOf(
-                    "rangeMi" to e.driveRangeMi(can.fuelLevelPct, can.avgMpg),
+                    "rangeMi" to range,
                     "roundTripMi" to e.roundTripRadiusMi(can.fuelLevelPct, can.avgMpg),
                     "fuelGal" to e.fuelGal(can.fuelLevelPct),
                     "fuelFlowGph" to e.fuelFlowGph(can.mafGs),
                     "idleHours" to e.idleHoursRemaining(can.fuelLevelPct, can.mafGs),
                     "charge" to e.charge(can.rpm, can.batteryV, can.connected).name,
+                    "nearestFuelMi" to nearestFuelMi,
+                    "reserveShort" to e.reserveShort(range, nearestFuelMi),
                 )
             },
             "battery" to mapOf(

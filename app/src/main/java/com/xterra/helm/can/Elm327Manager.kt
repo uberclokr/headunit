@@ -113,7 +113,15 @@ class Elm327Manager(
                     coolantC = pid("0105")?.let { it[0] - 40 },
                     intakeC  = pid("010F")?.let { it[0] - 40 },
                     fuelPct  = pid("012F")?.let { it[0] * 100f / 255f },
-                    batteryV = atCommand("ATRV")?.removeSuffix("V")?.toFloatOrNull(),
+                    // ATRV reports the OBD-port voltage (≈ battery, ~14 V while
+                    // charging). The raw buffer carries echo + "\r\r>", so pull
+                    // the first plausible voltage out — the old removeSuffix("V")
+                    // never matched (string ends in '>') and always gave null.
+                    batteryV = atCommand("ATRV")?.let { r ->
+                        Regex("""\d+(?:\.\d+)?""").findAll(r)
+                            .mapNotNull { it.value.toFloatOrNull() }
+                            .firstOrNull { it in 5f..30f }
+                    },
                 )
                 // 0101 byte A: bit7 = MIL lamp, bits 0-6 = stored DTC count
                 pid("0101")?.let { st ->

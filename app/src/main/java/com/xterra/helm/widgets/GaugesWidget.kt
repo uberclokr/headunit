@@ -49,7 +49,7 @@ private const val RPM_REDLINE = 5500f
  * TILT is special — its tile shows current max roll/pitch and, when tapped,
  * renders the truck-silhouette tilt graphic instead of a line trend.
  */
-private enum class GMetric { MPG, AVG, ECT, IAT, FUEL, THR, TILT }
+private enum class GMetric { MPG, AVG, ECT, IAT, THR, TILT }
 
 /** RPM arc + speed numeral, tap-selectable 60 s trend, readout tiles. */
 @Composable
@@ -106,8 +106,7 @@ fun GaugesWidget() {
             StatTile(GMetric.ECT, sel, s.coolantC?.let { "$it°C" },
                 alert = (s.coolantC ?: 0) > 105) { sel = GMetric.ECT }
             StatTile(GMetric.IAT, sel, s.intakeC?.let { "$it°C" }) { sel = GMetric.IAT }
-            StatTile(GMetric.FUEL, sel, s.fuelLevelPct?.let { "${it.toInt()}%" },
-                alert = (s.fuelLevelPct ?: 100f) < 12f) { sel = GMetric.FUEL }
+            // Fuel is reported in gallons (RANGE & FUEL), not as a percentage.
             StatTile(GMetric.THR, sel, s.throttlePct?.let { "${it.toInt()}%" }) { sel = GMetric.THR }
             // Max current tilt (dominant axis) → tap for the tilt graphic.
             val maxTilt = if (tilt.available) max(abs(tilt.rollDeg), abs(tilt.pitchDeg)) else null
@@ -156,7 +155,7 @@ private fun StatTile(
 @Composable
 private fun StarterSection(starterV: Float?, ecuOnline: Boolean, charge: VehicleEnergy.Charge) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("STARTER BATTERY · via ECM", style = MaterialTheme.typography.labelSmall,
+        Text("STARTER BATTERY · via OBD", style = MaterialTheme.typography.labelSmall,
             color = HelmColors.TextDim)
         Spacer(Modifier.weight(1f))
         // Charge verdict — blank when the engine's off (nothing to judge).
@@ -256,7 +255,8 @@ private fun EnergySection(s: VehicleState, b: com.xterra.helm.power.BattState) {
             Readout("RANGE", range?.let { "%.0f mi".format(it) } ?: "—",
                 alert = range != null && range < 40f)
             Readout("↺ TURN", radius?.let { "%.0f mi".format(it) } ?: "—")
-            Readout("FUEL", gal?.let { "%.1f gal".format(it) } ?: "—")
+            Readout("FUEL", gal?.let { "%.1f gal".format(it) } ?: "—",
+                alert = gal != null && gal < VehicleEnergy.TANK_GAL * 0.12f)
             Readout(if (idling) "IDLE" else "BURN", gph?.let { "%.1f gph".format(it) } ?: "—")
         }
         if (idling) {
@@ -387,7 +387,6 @@ private fun MetricTrend(
             GMetric.AVG -> sample.avgMpg
             GMetric.ECT -> sample.coolantC?.toFloat()
             GMetric.IAT -> sample.intakeC?.toFloat()
-            GMetric.FUEL -> sample.fuelPct
             GMetric.THR -> sample.throttlePct
             GMetric.TILT -> null
         }
@@ -406,7 +405,7 @@ private fun MetricTrend(
             val plotW = size.width - gutter
             val plotH = size.height
             val yMax = when (metric) {
-                GMetric.FUEL, GMetric.THR -> 100f     // percentages: fixed full-scale
+                GMetric.THR -> 100f     // percentage: fixed full-scale
                 GMetric.MPG -> max(30f, ceil((history.maxOrNull() ?: 0f) / 10f) * 10f)
                 else -> max(10f, ceil((history.maxOrNull() ?: 0f) / 10f) * 10f)
             }

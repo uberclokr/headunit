@@ -190,3 +190,69 @@ recon/SAR deliverable.
 Each is high mission value, mostly reuses infrastructure already in place
 (nav/POI, IMU, the companion alert path), and needs at most one or two new
 standard PIDs. Gate the PID-dependent work behind the step-zero capability scan.
+
+---
+
+# RTK base → drone corrections (drone-ops, larger integration)
+
+> **Status: TODO / sidelined.** Spec captured now; build later. Owner will
+> bench-test the Here4 USB path before we commit to the extraction method.
+> Operating mode (below) is deferred — decide before building.
+
+Turn the vehicle into an **RTK base** that feeds cm-level corrections to the
+MAVLink drone through the Herelink on the shared WiFi. The head unit becomes the
+**RTK base injector**. This dovetails with ROADMAP #6 (LAN MAVLink) — the
+MAVLink framing built here is a strict subset of the telemetry pane.
+
+**Data path:**
+```
+Here4 (base) ──RTCM3──▶ Helm head unit ──GPS_RTCM_DATA (MAVLink, ≤180B frags)──▶
+  UDP over vehicle WiFi ──▶ Herelink ground unit ──RF──▶ air unit ──▶
+  flight controller ──▶ rover GPS ──▶ RTK Fixed
+```
+
+### Piece 1 — get RTCM3 out of the Here4  ← the gating unknown
+The Here4 is fundamentally a **DroneCAN** device (meant to hang off a Cube), not
+a plug-and-play USB base like an F9P. Options, best first:
+- **USB-C serial passthrough:** if the USB-C exposes the Unicore receiver's UART,
+  configure it into base mode (survey-in / fixed) with RTCM3 out (1005/1006 +
+  MSM obs) via Unicore config strings, and read the stream with the CDC-ACM stack
+  `GpsRepository` already uses. All on the head unit. **Unverified — needs a
+  bench test to confirm the passthrough carries raw RTCM.**
+- **DroneCAN:** USB-CAN adapter + a DroneCAN node on the head unit to subscribe
+  to the base stream. Heavier on Android; avoid unless USB is dead.
+- **Fallback hardware:** a purpose-built USB base (ArduSimple simpleRTK2B /
+  SparkFun F9P) outputs RTCM3 over USB-serial by design — sidesteps the Here4
+  uncertainty entirely.
+
+### Piece 2 — head unit: RTCM → MAVLink injector (new, small)
+Reuse the USB-serial reader; add a minimal MAVLink v2 sender that fragments the
+RTCM3 into `GPS_RTCM_DATA` (#233: flags/len/data[180]) addressed to the drone's
+sysid. No full-telemetry parse needed just to inject.
+
+### Piece 3 — cross the WiFi, into the drone
+The Herelink ground unit (Android) bridges its MAVLink onto the WiFi as UDP
+(forward to network / UDP 14550). The head unit joins that stream and injects the
+`GPS_RTCM_DATA` frames; Herelink relays over RF; the FC forwards to the rover GPS
+(ArduPilot `GPS_INJECT_TO`, auto-config on). No custom app on the Herelink for
+the direct-inject path. Alternative: NTRIP caster on the head unit + NTRIP client
+(Mission Planner / QGC) on the Herelink — more moving parts, less preferred.
+
+### Bonus — one injector, two sources
+The same injector can be fed by a **public NTRIP mount over Starlink** when in
+CORS coverage (absolute RTK, zero base setup), falling back to the Here4 base out
+past CORS range.
+
+### Open decisions
+- **Operating mode (deferred):** stationary survey-in base (absolute cm RTK,
+  base must stay put) vs moving-baseline / follow-me (relative cm, needs a stable
+  vehicle heading source, more config) vs both/switchable. Decide before building
+  — it drives the base config.
+- **Here4 extraction (test later):** confirm whether the USB-C gives raw RTCM
+  before writing the injector; if not, DroneCAN or the F9P fallback.
+
+### Caveats
+- Here4 USB extraction is the only unverified piece; the rest is well-trodden.
+- RTCM bandwidth is trivial for the RF link (~1–4 kbit/s at 1 Hz MSM).
+- A stationary base must actually stay put during the op (survey-in), else it's
+  moving-baseline.

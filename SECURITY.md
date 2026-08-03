@@ -27,7 +27,7 @@ so "on the AP" is a real attacker position, not just the trusted owner.
 |---|-----|---------|-------|--------|
 | 1 | HIGH | Exported debug broadcasts → arbitrary CAN/ECU injection (`ELM_CMD`), nav hijack, metered-data burn | `system/VehicleService.kt:164` | OPEN |
 | 2 | HIGH | RTSP camera relay unauthenticated, bound to all interfaces | `system/RtspRelay.kt` | OPEN |
-| 3 | HIGH | Static, in-repo AP credentials (`helmnet` / `helmrecon`) | `system/SettingsRepository.kt`, `HotspotManager.kt` | OPEN |
+| 3 | HIGH | Static, in-repo AP credentials (`helmnet` / `helm••••`) | `system/SettingsRepository.kt`, `HotspotManager.kt` | OPEN |
 | 4 | MED | Status API binds `0.0.0.0`, non-constant-time token, **fails open** when token unset (exposes precise GPS) | `system/ApiServer.kt:36` | OPEN |
 | 5 | MED | Hardcoded private hardware IDs (router BSSID, Renogy MAC) in source | `SettingsRepository.kt`, `HotspotManager.kt` | OPEN |
 | 6 | LOW | `local.properties` tracked in the head-unit repo | repo root | **FIXED** |
@@ -57,7 +57,7 @@ an open proxy/SSRF — exposure is strictly the camera stream.
   firewall `:8554` to the WG subnet.
 
 ### 3 — Static in-repo AP credentials (HIGH)
-Default SoftAP `ssid = "helmnet"`, `pass = "helmrecon"` — a single guessable WPA2
+Default SoftAP `ssid = "helmnet"`, `pass = "helm••••"` — a single guessable WPA2
 password committed to source and shared with the dashcam. Because the head unit
 is the AP and co-hosts the unauthenticated relay (#2) and the token-gated API (#4)
 on `0.0.0.0`, whoever has this password lands on the same L2 as all of it.

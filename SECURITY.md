@@ -18,8 +18,11 @@ so "on the AP" is a real attacker position, not just the trusted owner.
   hardcoded API keys, passwords, or tokens in *tracked* source; `secret.properties`
   is gitignored and untracked in both repos.
 - ⚠️ **Open items exist** around unauthenticated LAN services, a status API that
-  can fail open, exported debug broadcasts that reach the vehicle bus, and
-  weak-by-default / in-source credentials that matter for a public mirror.
+  can fail open, and exported debug broadcasts that reach the vehicle bus.
+- 🧹 **Sanitized for public release:** the in-source AP password and hardware
+  MACs (#3, #5) and the tracked `local.properties` (#6) have been redacted /
+  untracked; personal `.obsidian/` + `*.base` notes are now gitignored. The
+  remaining OPEN items are behavioral code changes left to the owner's call.
 
 ## Findings (ranked)
 
@@ -27,9 +30,9 @@ so "on the AP" is a real attacker position, not just the trusted owner.
 |---|-----|---------|-------|--------|
 | 1 | HIGH | Exported debug broadcasts → arbitrary CAN/ECU injection (`ELM_CMD`), nav hijack, metered-data burn | `system/VehicleService.kt:164` | OPEN |
 | 2 | HIGH | RTSP camera relay unauthenticated, bound to all interfaces | `system/RtspRelay.kt` | OPEN |
-| 3 | HIGH | Static, in-repo AP credentials (`helmnet` / `helm••••`) | `system/SettingsRepository.kt`, `HotspotManager.kt` | OPEN |
+| 3 | HIGH | Static, in-repo AP **password** committed to source | `system/SettingsRepository.kt`, `HotspotManager.kt` | **REDACTED** |
 | 4 | MED | Status API binds `0.0.0.0`, non-constant-time token, **fails open** when token unset (exposes precise GPS) | `system/ApiServer.kt:36` | OPEN |
-| 5 | MED | Hardcoded private hardware IDs (router BSSID, Renogy MAC) in source | `SettingsRepository.kt`, `HotspotManager.kt` | OPEN |
+| 5 | MED | Hardcoded private hardware IDs (router BSSID, Renogy MAC) in source | `SettingsRepository.kt`, `HotspotManager.kt`, `BatteryRepository.kt` | **REDACTED** |
 | 6 | LOW | `local.properties` tracked in the head-unit repo | repo root | **FIXED** |
 | 7 | LOW | Latent root command injection via Hotspot settings (owner-only input today) | `system/HotspotManager.kt:60` | OPEN |
 | 8 | LOW | `allowBackup="true"` on the companion | `helm-companion` manifest | OPEN |
@@ -131,13 +134,18 @@ The companion requests **no location permission** and renders position from the 
   fixed dish. `BootReceiver`/`MainActivity` exports are required by design;
   `HelmNotificationListener` is system-permission-guarded.
 
-## Before mirroring to a public repo
+## Public-mirror status
 
-1. Decide **public vs private** — if private, most of the below is optional.
-2. If public: rotate/redact #3 (AP password) and #5 (BSSID/Renogy MAC) out of
-   source; they are real, in-use values.
-3. Review `docs/img/*.png` — the screenshots show the vehicle's **real GPS
-   location** (Newport, OR area), the `helmnet` SSID, and the NAS IP. Redact or
-   re-shoot from a neutral location if that matters to you.
-4. Consider closing #1 (`ELM_CMD` export), #2 (relay auth), and #4 (API fail-open)
-   before the code is public — they read as inviting once anyone can see them.
+This repo is mirrored **public** to GitHub. Pre-mirror hygiene done:
+
+1. ✅ AP password (#3) and hardware MACs (#5) redacted from source; real values
+   live only in on-device settings / `secret.properties`.
+2. ✅ `local.properties` untracked (#6); `.obsidian/` + `*.base` personal notes
+   gitignored.
+3. ✅ Screenshots (`docs/img/*.png`) — location is intentionally published
+   (owner's call); no passwords/MACs appear in them.
+4. ⏳ Still recommended before relying on the public code: close #1 (`ELM_CMD`
+   export), #2 (relay auth), #4 (API fail-open). Left OPEN for the owner.
+
+The `~/Scripts/github-mirror.sh` guard re-scans tracked files for the redacted
+markers on every push, so a re-introduced secret is blocked before it ships.

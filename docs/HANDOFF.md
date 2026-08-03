@@ -64,12 +64,12 @@ substitute.
   trackers: position packets `0x06`/`0x09`, big-endian, lon@9..12 lat@13..16
   as int32÷1e6, battery last byte. Bind cards in the LoRa pane (OTAA or ABP).
 - **Viofo A329S dashcam**: joins the head unit's own 5 GHz SoftAP
-  **`helmnet`** (no hyphen) / pass `helmrecon`, lands at
+  **`helmnet`** (no hyphen) / pass `<redacted — set in Settings>`, lands at
   **192.168.133.208**. A `/32` VPN-bypass route is pinned so the head unit
   reaches it off-tunnel. Clip index API: `GET /?custom=1&cmd=3015`;
   files at `http://<ip>/DCIM/Movie/<name>`; channel switch `cmd=3028&par=N`
   (0=front 1=interior 2=rear).
-- **Renogy house battery**: BT-2 BLE module at **`6C:B2:FD:85:C5:0F`** on
+- **Renogy house battery**: BT-2 BLE module at **`<your-renogy-mac>`** on
   the smart-battery UP port; register map at 0x0100 range, real coulomb SOC.
 - **Sensors**: the Edge2 has an **accelerometer only** — no gyro, no
   magnetometer. Inclinometer + nav heading both derive from that + GPS

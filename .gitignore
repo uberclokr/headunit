@@ -6,3 +6,7 @@ build/
 local.properties
 local.properties.bak
 secret.properties
+
+# personal notes / editor state
+.obsidian/
+*.base

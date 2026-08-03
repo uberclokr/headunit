@@ -40,10 +40,10 @@ data class HelmSettings(
     // lavalink to pin the STA to (same-channel concurrency keeps the AP on
     // 5 GHz only while the STA is).
     val hotspotSsid: String = "helmnet",
-    val hotspotPass: String = "helmrecon",
-    val staBssid: String = "7a:f8:c2:3e:35:c6",
+    val hotspotPass: String = "changeme",         // set a strong AP password in Settings
+    val staBssid: String = "",                     // your 5 GHz router BSSID (Settings)
     // Renogy BT-2 module on the smart battery's UP port.
-    val renogyMac: String = "6C:B2:FD:85:C5:0F",
+    val renogyMac: String = "",                    // your Renogy BLE MAC (nRF Connect)
     // Inclinometer ZERO: the gravity vector (device frame, "x,y,z") captured
     // parked on level ground. Empty = never calibrated.
     val tiltCal: String = "",

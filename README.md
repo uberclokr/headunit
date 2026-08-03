@@ -136,8 +136,8 @@ a **QR to install the phone companion** pre-configured for the vehicle VPN.
 
 ## Phone companion app
 
-[`helm-companion`](https://github.com/) is a thin phone-side read view over the
-WireGuard VPN — live cameras, a map of the vehicle position, engine/network/power
+[`helm-companion`](https://github.com/uberclokr/helm-companion) is a thin
+phone-side read view over the WireGuard VPN — live cameras, a map of the vehicle position, engine/network/power
 readouts, RANGE & FUEL, and background **threshold alerts** (house battery SOC,
 pack temperature) via local notifications. Shares Helm's instrument-glass theme.
 

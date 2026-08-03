@@ -18,7 +18,7 @@ object HotspotManager {
     // values before the first ensure(). No hyphen in the SSID — the Viofo is
     // provisioned to join "helmnet"; keep them matched.
     var ssid = "helmnet"
-    var pass = "helmrecon"                // WPA2, 8–63 chars
+    var pass = "changeme"                 // WPA2, 8–63 chars — set a strong one in Settings
     const val AP_IFACE = "wlan1"          // SoftAP lands here on this image
     const val SUBNET = "192.168.133"      // dnsmasq hands the camera .x here
     // lavalink's 5 GHz BSSID. This WiFi chip (AP6275P) does STRICT same-channel
@@ -26,7 +26,7 @@ object HotspotManager {
     // AP CANNOT be on different bands. Viofo needs a 5 GHz AP, so we pin the
     // STA to 5 GHz; the AP then co-channels to 5 GHz. Update if the router's
     // BSSID changes.
-    var staBssid = "7a:f8:c2:3e:35:c6"
+    var staBssid = ""                     // your router's 5 GHz BSSID; set in Settings
     private const val SOCK = "/data/vendor/wifi/wpa/sockets"
     private const val TAG = "Helm"
 

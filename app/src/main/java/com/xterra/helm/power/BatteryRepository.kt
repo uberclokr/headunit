@@ -44,7 +44,7 @@ class BatteryRepository(context: Context) {
     val state: StateFlow<BattState> = _state
 
     // ── configure for your hardware ─────────────────────────────
-    var mac = "6C:B2:FD:85:C5:0F"        // BT-TH-FD85C50F, BLE-scanned 2026-07-16
+    var mac = ""                          // your Renogy BLE MAC — find via nRF Connect
     var mirrorToSystem = true
     // kind + deviceId are auto-detected on every connect (see detect()), so
     // moving the BT-2 between the DC-DC charger and the smart battery works

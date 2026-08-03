@@ -231,4 +231,9 @@ WireGuard VPN.
   [`docs/THERMAL.md`](docs/THERMAL.md), [`docs/NAV_OFFLINE.md`](docs/NAV_OFFLINE.md)
   — subsystem guides.
 - [`SECURITY.md`](SECURITY.md) — security & privacy review.
+
+## License
+
+[MIT](LICENSE) © 2026 Parker Hill. Provided as-is — this drives a moving vehicle;
+see `SECURITY.md` and the "honest status" notes before relying on any subsystem.
 </content>

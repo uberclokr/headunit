@@ -1,154 +1,234 @@
 # Helm
 
-An always-on head-unit dashboard for the Xterra build — Khadas Edge2 (RK3588,
-Android 14), 10" multitouch, house-battery powered.
+**A custom Android 14 head-unit dashboard for a recon / emergency-operations
+vehicle** — a 2008 Nissan Xterra built out with a Khadas Edge2 (RK3588), a 10"
+landscape multitouch screen, house-battery power (always on), full-time Starlink,
+and a vehicle LAN. Helm replaces the Android launcher and runs kiosk-style: one
+pane of glass for navigation, engine data, cameras, radio spectrum, house power,
+and networking, dockable side-by-side.
+
+![Helm dashboard — SDR + Vehicle panes](docs/img/dashboard.png)
 
 **Design language: "instrument glass."** Deep blue-black panels, phosphor-amber
 for controls (night-vision safe), glacier-cyan for live data, red reserved for
-genuine alerts. Monospace numerals so gauges never jitter. Two big panes with a
-draggable divider instead of a desktop window manager — at arm's length in a
-moving truck, two targets you can hit blind beats ten you can't.
+genuine alerts. Monospace numerals so gauges never jitter. The theme flips
+day/night automatically from solar elevation. Two big panes with a draggable
+divider instead of a desktop window manager — at arm's length in a moving truck,
+two targets you can hit blind beat ten you can't.
 
-```
-┌─────────────────────────────────────────────────────┐
-│ 14:32   ● CAN   BATT 13.8V   ECT 88°        SPD 47  │
-├───────────────────────┬──╢ ╟────────────────────────┤
-│                       │                             │
-│         NAV           │       MEDIA / GAUGES /      │
-│      (map pane)       │       CAMS / SDR / ...      │
-│                       │                             │
-├───────────────────────┴─────────────────────────────┤
-│ NAV  MEDIA  VEHICLE  CAM·FWD  THERMAL  DRONE  SDR ⇄ │
-└─────────────────────────────────────────────────────┘
-```
+> **Status:** running on the vehicle. This started as a single-session design
+> generation and has since been built, deployed, and iterated on the actual
+> Edge2 hardware. Some hardware-facing paths are still marked below where they
+> await bench verification.
 
-## Documentation map
+---
 
-- `CLAUDE.md` — working contract for Claude Code sessions: mission,
-  architecture rules, honest status, do-nots. **Start here.**
-- `docs/FEATURES.md` — per-feature spec: goal, behavior, status,
-  acceptance criteria, open work.
-- `docs/ROADMAP.md` — phased priorities (shakedown → recon/EOC → depth).
-- `docs/HARDWARE.md` — wiring, one-time device commands, bench checklist.
-- `docs/SOCKETCAN.md`, `docs/THERMAL.md` — subsystem build guides.
+## Table of contents
 
-## What's implemented
+- [The two-pane dock](#the-two-pane-dock)
+- [Navigation](#navigation)
+- [Vehicle / OBD](#vehicle--obd)
+- [Attitude (inclinometer)](#attitude-inclinometer)
+- [SDR / radio](#sdr--radio)
+- [Cameras](#cameras)
+- [Media](#media)
+- [Networking (Starlink + WiFi)](#networking-starlink--wifi)
+- [House power](#house-power)
+- [Settings: offline cache, remote access, companion](#settings-offline-cache-remote-access-companion)
+- [Phone companion app](#phone-companion-app)
+- [Architecture](#architecture)
+- [Build](#build)
+- [Device setup & hardware](#device-setup--hardware)
+- [Security & privacy](#security--privacy)
+- [Documentation map](#documentation-map)
 
-| Subsystem | Status | Files |
-|---|---|---|
-| Pane/dock UI, widget picker, drag divider | ✅ complete | `ui/` |
-| CAN via USB ELM327 (RPM, speed, temps, MAF→MPG, fuel, voltage) | ✅ complete | `can/Elm327Manager.kt` |
-| Reverse detection via GPIO reverse-lamp tap | ✅ complete (set pin #) | `can/GpioReverseSensor.kt` |
-| Auto full-screen backup cam overlay on reverse | ✅ complete | `cameras/ReverseOverlayService.kt` |
-| RTSP camera panes (Viofo A329 ×3 + drone feed), low-latency LibVLC | ✅ complete (set IPs) | `cameras/RtspView.kt` |
-| Universal media transport (YT Music, Audible, any MediaSession) | ✅ complete | `media/MediaRepository.kt` |
-| Spotify rich control (App Remote SDK) | ✅ needs CLIENT_ID + AAR | `media/SpotifyRemote.kt` |
-| SDR: rtl_tcp client, WBFM demod → speakers, spectrum + waterfall, band scan | ✅ complete | `sdr/` |
-| Raw SocketCAN sniffer (IO-hat transceiver) | 🔧 JNI stub + full guide | `docs/SOCKETCAN.md` |
-| USB thermal (UVC) | 🔧 lib wired, 20-line fragment to add | `docs/THERMAL.md` |
-| Freeform side-by-side launching of *external* apps | ✅ complete | `system/AppLauncher.kt` |
-| Renogy BLE house battery → POWER pane + Android system battery | ✅ set MAC + kind | `power/` |
+---
 
-This project was generated, not compiled — expect an hour of Android Studio
-shakedown (imports, lib version bumps) before first flash. The architecture
-and the hard parts (ELM protocol, FM DSP, overlay service, session control)
-are done.
+## The two-pane dock
 
-## Build
+Every feature is a **widget**; any widget docks into either of the two panes,
+picked from the dock bar or the widget catalog. Panes resize with a draggable
+divider. Widgets are dumb `StateFlow` collectors, so the layout is free — a
+widget can go anywhere without touching the data layer.
 
-1. Open in Android Studio (Hedgehog+ / AGP 8.5).
-2. Download `spotify-app-remote-release-0.8.0.aar` from
-   github.com/spotify/android-sdk/releases → `app/libs/`. Register an app at
-   developer.spotify.com, set `CLIENT_ID` and redirect URI in
-   `SpotifyRemote.kt` (add the redirect to the Spotify dashboard too).
-3. `local.properties`: add `MAPS_API_KEY=<key>` (Maps SDK for Android).
-4. Build → install → set Helm as HOME when prompted.
+![Widget catalog](docs/img/panes.png)
 
-## Device setup (one time, adb or root shell)
+## Navigation
 
-```bash
-# Side-by-side freeform for external apps (Maps beside Helm, etc.)
-settings put global enable_freeform_support 1
-settings put global force_resizable_activities 1
+MapLibre Native with **USGS Topo** draped over a 3D terrain mesh, keyless.
+Fully offline-capable: regional tile downloads (e.g. all of Western Oregon) plus
+an embedded **GraphHopper** routing graph give turn-by-turn with voice with no
+connectivity. Address/business **search** uses the keyless Photon geocoder online
+but routes offline. Waypoints are categorized (waypoint / **fuel** / **base**),
+color-coded, and drive a **round-trip range ring** ("how far can I go and still
+get back on the fuel aboard") plus a **reserve alert** when the range no longer
+reaches the nearest fuel/base.
 
-# GPIO for the reverse-lamp tap (pick your IO-hat pin, see below)
-echo 113 > /sys/class/gpio/export
-echo in > /sys/class/gpio/gpio113/direction
-chmod 644 /sys/class/gpio/gpio113/value
-```
+![Nav — 3D topo, waypoints, range ring](docs/img/nav.png)
 
-Grant on first launch when prompted: **Display over other apps** (reverse
-overlay), **Notification access** (media session control), **Location**
-(map + speed cross-check).
+## Vehicle / OBD
 
-## Wiring
+Live engine data over a USB ELM327 at ~8 Hz — RPM, speed, coolant/intake temps,
+throttle, MAF-derived instant & trip **MPG**, fuel level, DTCs. Derived on top
+(see [`docs/PROPOSALS.md`](docs/PROPOSALS.md) Tier 1): **drivable range**,
+round-trip radius, fuel gallons, idle-endurance (engine-as-generator), and an
+**alternator/charge-system verdict** from the bus voltage. A top-down **level
+bubble** rides alongside RPM/MPH. The right pane of the [hero shot](#helm) shows
+the full vehicle pane: instrument row, tap-selectable 60 s trend, ECM stat tiles,
+RANGE & FUEL, starter + house battery.
 
-**Reverse-lamp → GPIO:** reverse-lamp 12 V → 2.2 kΩ → PC817 optocoupler LED →
-lamp ground; opto transistor pulls the GPIO to 3V3 (collector to 3V3 via 10 k,
-emitter to GND, GPIO at collector = active-low, or invert `ACTIVE_LEVEL`).
-Never feed 12 V near the hat directly.
+## Attitude (inclinometer)
 
-**OBD:** any CH340/FTDI/CP2102 ELM327 USB dongle into the Edge2 hub. Genuine
-OBDLink SX is worth it — clone ELMs drop ~30% of fast-poll responses.
+Off-road roll/pitch from the head unit's accelerometer, rendered as truck
+silhouettes rotating against a fixed horizon with warn/danger protractor bands,
+live numerals, session peaks, and a combined tilt bubble.
 
-**Viofo A329 LAN:** give the cam a static DHCP lease; verify stream paths with
-`ffprobe rtsp://<ip>/live` (`/live2` rear, `/live3` interior — confirm on your
-firmware) and set them in `CameraRegistry.kt`. Rear channel runs at
-150 ms network-caching for the backup view.
+![Inclinometer](docs/img/tilt.png)
 
-**RTL-SDR:** easiest path is the "SDR Driver" app (handles USB permission,
-serves rtl_tcp on 127.0.0.1:1234) or Termux `rtl_tcp -a 127.0.0.1`. Helm
-auto-connects on opening the SDR pane. Antenna: roof-mag-mount FM whip; add
-an FM bandstop later if broadcast blasts your other SDR work.
+## SDR / radio
 
-## House battery (Renogy BLE → system battery)
+An RTL-SDR over `rtl_tcp` drives a live **spectrum + waterfall**, WBFM/NBFM/AM
+demod to the speakers, and a per-band channel browser for the voice-comms
+services — **FM / AM / AIR / WX / FRS / GMRS / MURS / marine / CB / 2 m / 70 cm**
+— with accurate US channel plans, carrier squelch (hysteresis), CTCSS/PL tone
+decode, per-service scan, and an antenna/λ info panel. A TX scaffold is in place
+for a future transmit-capable SDR. (Band selector visible in the [hero shot](#helm).)
 
-`power/RenogyBleClient.kt` speaks Renogy's Modbus-over-GATT (write FFD1,
-notify FFF1 — the renogy-bt protocol). Two register maps are built in:
+## Cameras
 
-- `SMART_BATTERY` — RBT-series batteries with built-in BLE: SOC, V, signed A,
-  remaining/total Ah, per-cell volts, pack temp, runtime estimate.
-- `BT2_CONTROLLER` — Rover/Wanderer/DCC via a BT-1/BT-2 dongle: SOC, V, A.
+RTSP camera panes via low-latency LibVLC — three Viofo A329 views (front / cabin
+/ rear) plus a drone FPV source and a nestable thermal (UVC) view. The **rear
+camera takes the whole screen automatically the instant reverse engages**,
+regardless of foreground app (an overlay service), then releases.
 
-Setup: find the MAC in nRF Connect, set `mac`, `kind`, and (hub installs)
-`deviceId` in `BatteryRepository.kt`. If you're running the standalone 500 A
-shunt monitor, sniff one app exchange with nRF Connect and adjust the
-register constants — transport is identical.
+## Media
 
-**System-battery mirroring:** `SystemBatteryBridge` pushes SOC/charge state
-into Android via root `dumpsys battery set level/status/ac` + `unplug`. The
-status-bar icon, quick settings, and every app's BatteryManager then report
-the house pack — the OS genuinely believes it's the device battery. Re-pushed
-each 5 s poll; `dumpsys battery reset` (or reboot) restores stock behavior.
-Watch for Battery Saver engaging at low SOC — that's arguably a feature on a
-draining pack, or kill it with `settings put global low_power_trigger_level 0`.
-For a root-free permanent image, the alternative is a virtual power_supply
-kernel node that healthd reads natively; the su path gets identical results
-with zero image changes.
+Universal transport control over Android `MediaSession` (YouTube Music, Audible,
+NPR One, VLC, anything), plus rich Spotify control via the App Remote SDK. Reads
+now-playing from the notification listener; nothing leaves the device.
 
-## Latency notes (backup camera)
+## Networking (Starlink + WiFi)
 
-IP-camera reverse view is inherently ~0.3–0.5 s glass-to-glass even tuned
-(camera encode + network + decode). Fine for guidance; if you ever want
-sub-100 ms, add a $20 analog CVBS camera on a USB capture dongle as the
-reverse source and keep the Viofo as the recorded/browsable rear view. The
-overlay service doesn't care where the frame comes from — swap `RtspView`
-for a UVC view in `ReverseOverlayService`.
+Starlink dish health straight off the local gRPC API (uptime, PoP latency,
+throughput, obstruction, alerts), a locally-integrated **data-usage** meter for
+the billing cycle, WiFi STA/hotspot status, and WireGuard/Internet reachability.
+
+![Network — Starlink, WiFi, links](docs/img/net.png)
+
+## House power
+
+The house battery is *the* battery. `power/RenogyBleClient` speaks Renogy's
+Modbus-over-GATT (smart battery or BT-2 controller) for SOC / V / signed A /
+Ah / per-cell / temp / runtime, and **mirrors SOC into Android's BatteryService**
+so the OS status bar and every app report the house pack, not a nonexistent
+internal cell.
+
+## Settings: offline cache, remote access, companion
+
+DataStore-backed settings: offline **map-tile regions** and the routing graph
+(with sizes + per-region delete), a **VNC remote-access guard** that caps stale
+screen-share sessions (a forgotten viewer once streamed ~59 GB over Starlink —
+now auto-cut at a configurable minute cap, resetting the session at the netfilter
+layer while keeping the server listening), the Unraid waypoint-backup config, and
+a **QR to install the phone companion** pre-configured for the vehicle VPN.
+
+![Settings — offline cache, VNC guard, companion QR](docs/img/settings.png)
+
+## Phone companion app
+
+[`helm-companion`](https://github.com/) is a thin phone-side read view over the
+WireGuard VPN — live cameras, a map of the vehicle position, engine/network/power
+readouts, RANGE & FUEL, and background **threshold alerts** (house battery SOC,
+pack temperature) via local notifications. Shares Helm's instrument-glass theme.
+
+![Companion — camera + location](docs/img/companion.png)
+![Companion — engine, battery, alerts](docs/img/companion-data.png)
+
+---
 
 ## Architecture
 
 ```
-HelmApp (service locator)
- ├── CanRepository ── Elm327Manager (USB serial poll)
- │        └───────── GpioReverseSensor (sysfs poll) ──▶ VehicleState flow
- ├── MediaRepository ── MediaSessionManager (+NotificationListener)
- ├── CameraRegistry ── RtspView (LibVLC) / ThermalView (UVC)
- ├── SdrRepository ── RtlTcpClient → WbfmDemodulator → AudioTrack
- │                              └──▶ Fft → spectrum flow → waterfall
+HelmApp (service locator — owns every repository)
+ ├── CanRepository ─ Elm327Manager (USB OBD) + GpioReverseSensor ─▶ VehicleState
+ │      └─ VehicleEnergy (pure: range / fuel / alternator, unit-tested)
+ ├── GpsRepository ─ USB u-blox (usb-serial) ─▶ GpsFix (+ system mock provider)
+ ├── NavRepository ─ GraphHopper (offline routing) + Photon (online geocode)
+ ├── PoiStore ─ waypoint GeoJSON (wp/fuel/base) + Unraid SFTP sync
+ ├── MediaRepository ─ MediaSessionManager (+ NotificationListener) / SpotifyRemote
+ ├── CameraRegistry ─ RtspView (LibVLC) / ThermalView (UVC) / ReverseOverlayService
+ ├── SdrRepository ─ RtlTcpClient → Dsp (FFT + demod) → AudioTrack + waterfall
+ ├── BatteryRepository ─ RenogyBleClient (Modbus/GATT) → SystemBatteryBridge
+ ├── TiltRepository ─ accelerometer → roll/pitch
+ ├── NetRepository / StarlinkClient / HomeLinkRepository ─ links + dish health
+ ├── VncManager ─ root watchdog capping stale screen-share sessions
  └── VehicleService (foreground, START_STICKY, boot receiver)
-        └── ReverseOverlayService (TYPE_APPLICATION_OVERLAY rear cam)
+        ├── ReverseOverlayService (auto rear-cam overlay)
+        └── ApiServer (:8080) + RtspRelay (:8554)  ← the companion's back end
 ```
 
-Everything is a `StateFlow`; widgets are dumb collectors, so any widget can
-dock in any pane and panes can be added (3-pane, saved layouts) without
-touching the data layer.
+Every subsystem is a repository exposing `StateFlow`; widgets collect and render.
+No DI framework — `HelmApp` is the locator. All external I/O lives in
+`Dispatchers.IO` with infinite retry/backoff; nothing crashes the process on link
+loss. Pure logic (`Dsp`, `VehicleEnergy`, Modbus CRC, ELM/NMEA parsing) is
+unit-tested (`app/src/test/`).
+
+## Build
+
+```bash
+./gradlew :app:assembleDebug          # Android SDK 34
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb logcat -s Helm AndroidRuntime
+```
+
+Prerequisites:
+- `app/libs/spotify-app-remote-release-0.8.0.aar` (Spotify GitHub releases) — for
+  rich Spotify control; universal transport works without it.
+- `secret.properties`: `HELM_API_TOKEN=<shared token>` — the bearer the companion
+  presents to the status API. **Gitignored; never commit it.**
+- `local.properties`: `MAPS_API_KEY=<key>` (only if using the Google basemap;
+  MapLibre/USGS needs no key).
+- Device one-time: freeform windowing, GPIO export for the reverse tap, root.
+
+## Device setup & hardware
+
+See [`docs/HARDWARE.md`](docs/HARDWARE.md) for wiring and the bench checklist.
+In brief:
+
+- **OBD:** any CH340/FTDI/CP2102 ELM327 USB dongle; a genuine OBDLink SX drops far
+  fewer fast-poll responses than clones.
+- **Reverse tap:** reverse-lamp 12 V → optocoupler → GPIO (never feed 12 V near
+  the hat); set the pin in `GpioReverseSensor`.
+- **Cameras:** static DHCP leases for the Viofo A329s; verify RTSP paths with
+  `ffprobe`; set in `CameraRegistry`.
+- **RTL-SDR:** an `rtl_tcp` source on `127.0.0.1:1234` (the SDR Driver app or
+  Termux); Helm auto-connects on opening the SDR pane.
+- **House battery:** find the Renogy MAC (nRF Connect), set `mac`/`kind` in
+  Settings/`BatteryRepository`.
+
+After any OS update, re-run `~/Scripts/POST-UPDATE-README.md` on the host (this is
+an atomic/immutable SteamOS-adjacent flow — see the host `CLAUDE.md`).
+
+## Security & privacy
+
+Helm's traffic profile is deliberately quiet — **no analytics, crash, or
+telemetry SDKs**; the only third-party egress is keyless map tiles (USGS/AWS) and
+the Photon geocoder on explicit searches. A full audit, including the known open
+items (unauthenticated LAN RTSP relay, status-API hardening, AP-credential
+strength, and the exported debug broadcasts), is documented in
+[`SECURITY.md`](SECURITY.md). Read it before exposing anything beyond the
+WireGuard VPN.
+
+## Documentation map
+
+- [`CLAUDE.md`](CLAUDE.md) — the working contract: mission, architecture rules,
+  honest status, do-nots. **Start here for development.**
+- [`docs/FEATURES.md`](docs/FEATURES.md) — per-feature spec, acceptance criteria.
+- [`docs/ROADMAP.md`](docs/ROADMAP.md) — phased priorities.
+- [`docs/PROPOSALS.md`](docs/PROPOSALS.md) — designed-but-unbuilt capabilities
+  (OBD-derived features, the RTK-base → drone-corrections integration).
+- [`docs/HARDWARE.md`](docs/HARDWARE.md), [`docs/SOCKETCAN.md`](docs/SOCKETCAN.md),
+  [`docs/THERMAL.md`](docs/THERMAL.md), [`docs/NAV_OFFLINE.md`](docs/NAV_OFFLINE.md)
+  — subsystem guides.
+- [`SECURITY.md`](SECURITY.md) — security & privacy review.
+</content>

@@ -3,5 +3,6 @@ build/
 .kotlin/
 .cxx/
 *.iml
+local.properties
 local.properties.bak
 secret.properties
